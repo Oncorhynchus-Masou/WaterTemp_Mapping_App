@@ -35,6 +35,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import com.example.gsitilemap.api.RetrofitClient
 
+
+
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,7 +63,26 @@ fun GsiTileMap() {
         try {
             val measurements = RetrofitClient.apiService.getMeasurements()
 
-            message = "取得成功：${measurements.size}件"
+            message = buildString {
+                append("取得成功：${measurements.size}件\n\n")
+
+                measurements.forEach { measurement ->
+                    append("ID: ${measurement.id}\n")
+                    append("日時: ${measurement.measuredAt}\n")
+                    append("位置: ${measurement.latitude}, ${measurement.longitude}\n")
+                    append("種類: ${measurement.measurementType}\n")
+                    append("読み取り数: ${measurement.readings.size}\n")
+
+                    measurement.readings.forEach { reading ->
+                        append(
+                            "  深度: ${reading.depthM} m / " +
+                                    "水温: ${reading.waterTemperatureC} ℃\n"
+                        )
+                    }
+
+                    append("\n")
+                }
+            }
         } catch (e: Exception) {
             message = "取得失敗：${e.message}"
         }
