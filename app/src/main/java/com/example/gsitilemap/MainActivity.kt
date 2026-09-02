@@ -34,8 +34,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import com.example.gsitilemap.api.RetrofitClient
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-
+import org.maplibre.android.annotations.MarkerOptions
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
@@ -91,11 +97,58 @@ fun GsiTileMap() {
     val mapView = remember {
         MapView(context).apply {
             getMapAsync { map ->
+
                 map.setStyle(Style.Builder().fromJson(GSI_STYLE)) {
+
                     map.cameraPosition = CameraPosition.Builder()
-                        .target(LatLng(35.6812, 139.7671)) // 東京駅付近
+                        .target(LatLng(35.6812, 139.7671))
                         .zoom(12.0)
                         .build()
+
+                    // FastAPIから水温データを取得
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            val measurements = RetrofitClient.apiService.getMeasurements()
+
+                            withContext(Dispatchers.Main) {
+
+                                if (measurements.isNotEmpty()) {
+                                    val first = measurements.first()
+
+                                    map.cameraPosition = CameraPosition.Builder()
+                                        .target(
+                                            LatLng(
+                                                first.latitude,
+                                                first.longitude
+                                            )
+                                        )
+                                        .zoom(14.0)
+                                        .build()
+                                }
+
+                                measurements.forEach { measurement ->
+
+                                    val position = LatLng(
+                                        measurement.latitude,
+                                        measurement.longitude
+                                    )
+
+                                    map.addMarker(
+                                        MarkerOptions()
+                                            .position(position)
+                                            .title("水温測定地点")
+                                            .snippet(
+                                                "${measurement.measurementType} / " +
+                                                        "${measurement.readings.size}件"
+                                            )
+                                    )
+                                }
+                            }
+
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
                 }
             }
         }
