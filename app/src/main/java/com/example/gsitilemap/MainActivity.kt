@@ -9,6 +9,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -28,20 +30,17 @@ import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
-
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import com.example.gsitilemap.api.RetrofitClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-
 import org.maplibre.android.annotations.MarkerOptions
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import com.example.gsitilemap.model.Measurement
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+
 
 class MainActivity : ComponentActivity() {
 
@@ -58,95 +57,114 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun GsiTileMap() {
+
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    var message by remember {
-        mutableStateOf("サーバーに接続しています...")
+    // 現在選択されている測定データ
+    val selectedMeasurement = remember {
+        mutableStateOf<Measurement?>(null)
     }
 
-    LaunchedEffect(Unit) {
-        try {
-            val measurements = RetrofitClient.apiService.getMeasurements()
-
-            message = buildString {
-                append("取得成功：${measurements.size}件\n\n")
-
-                measurements.forEach { measurement ->
-                    append("ID: ${measurement.id}\n")
-                    append("日時: ${measurement.measuredAt}\n")
-                    append("位置: ${measurement.latitude}, ${measurement.longitude}\n")
-                    append("種類: ${measurement.measurementType}\n")
-                    append("読み取り数: ${measurement.readings.size}\n")
-
-                    measurement.readings.forEach { reading ->
-                        append(
-                            "  深度: ${reading.depthM} m / " +
-                                    "水温: ${reading.waterTemperatureC} ℃\n"
-                        )
-                    }
-
-                    append("\n")
-                }
-            }
-        } catch (e: Exception) {
-            message = "取得失敗：${e.message}"
-        }
+    // マーカーとMeasurementの対応表
+    val markerMeasurements = remember {
+        mutableMapOf<Long, Measurement>()
     }
-
     val mapView = remember {
+
         MapView(context).apply {
+
             getMapAsync { map ->
 
-                map.setStyle(Style.Builder().fromJson(GSI_STYLE)) {
+                map.setStyle(
+                    Style.Builder().fromJson(GSI_STYLE)
+                ) {
 
-                    map.cameraPosition = CameraPosition.Builder()
-                        .target(LatLng(35.6812, 139.7671))
-                        .zoom(12.0)
-                        .build()
+                    // 初期位置
+                    map.cameraPosition =
+                        CameraPosition.Builder()
+                            .target(
+                                LatLng(
+                                    35.6812,
+                                    139.7671
+                                )
+                            )
+                            .zoom(12.0)
+                            .build()
 
-                    // FastAPIから水温データを取得
+                    // マーカーがタップされたとき
+                    map.setOnMarkerClickListener { marker ->
+                        selectedMeasurement.value =
+                            markerMeasurements[marker.id.toLong()]
+                        true
+                    }
+
+                    // FastAPIからデータ取得
                     CoroutineScope(Dispatchers.IO).launch {
+
                         try {
-                            val measurements = RetrofitClient.apiService.getMeasurements()
+
+                            val measurements =
+                                RetrofitClient.apiService
+                                    .getMeasurements()
 
                             withContext(Dispatchers.Main) {
 
+                                // 取得件数を確認
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "API取得成功: ${measurements.size}件",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+
                                 if (measurements.isNotEmpty()) {
+
                                     val first = measurements.first()
 
-                                    map.cameraPosition = CameraPosition.Builder()
-                                        .target(
-                                            LatLng(
-                                                first.latitude,
-                                                first.longitude
+                                    map.cameraPosition =
+                                        CameraPosition.Builder()
+                                            .target(
+                                                LatLng(
+                                                    first.latitude,
+                                                    first.longitude
+                                                )
                                             )
+                                            .zoom(14.0)
+                                            .build()
+
+                                    measurements.forEach { measurement ->
+
+                                        val position = LatLng(
+                                            measurement.latitude,
+                                            measurement.longitude
                                         )
-                                        .zoom(14.0)
-                                        .build()
-                                }
 
-                                measurements.forEach { measurement ->
+                                        val marker = map.addMarker(
+                                            MarkerOptions()
+                                                .position(position)
+                                                .title("水温測定地点")
+                                                .snippet(
+                                                    "${measurement.measurementType} / " +
+                                                            "${measurement.readings.size}件"
+                                                )
+                                        )
 
-                                    val position = LatLng(
-                                        measurement.latitude,
-                                        measurement.longitude
-                                    )
-
-                                    map.addMarker(
-                                        MarkerOptions()
-                                            .position(position)
-                                            .title("水温測定地点")
-                                            .snippet(
-                                                "${measurement.measurementType} / " +
-                                                        "${measurement.readings.size}件"
-                                            )
-                                    )
+                                        // マーカーと測定データを対応付ける
+                                        markerMeasurements[marker.id.toLong()] = measurement
+                                    }
                                 }
                             }
 
                         } catch (e: Exception) {
                             e.printStackTrace()
+
+                            withContext(Dispatchers.Main) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "API取得失敗: ${e.message}",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
                         }
                     }
                 }
@@ -154,68 +172,144 @@ fun GsiTileMap() {
         }
     }
 
-    DisposableEffect(lifecycleOwner, mapView) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_START -> mapView.onStart()
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                Lifecycle.Event.ON_STOP -> mapView.onStop()
-                else -> Unit
+    // MapViewのライフサイクル処理
+    DisposableEffect(
+        lifecycleOwner,
+        mapView
+    ) {
+
+        val observer =
+            LifecycleEventObserver { _, event ->
+
+                when (event) {
+
+                    Lifecycle.Event.ON_START ->
+                        mapView.onStart()
+
+                    Lifecycle.Event.ON_RESUME ->
+                        mapView.onResume()
+
+                    Lifecycle.Event.ON_PAUSE ->
+                        mapView.onPause()
+
+                    Lifecycle.Event.ON_STOP ->
+                        mapView.onStop()
+
+                    else -> Unit
+                }
             }
-        }
 
         lifecycleOwner.lifecycle.addObserver(observer)
 
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+        if (
+            lifecycleOwner.lifecycle.currentState
+                .isAtLeast(Lifecycle.State.STARTED)
+        ) {
             mapView.onStart()
         }
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+
+        if (
+            lifecycleOwner.lifecycle.currentState
+                .isAtLeast(Lifecycle.State.RESUMED)
+        ) {
             mapView.onResume()
         }
 
         onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
+
+            lifecycleOwner.lifecycle.removeObserver(
+                observer
+            )
+
             mapView.onDestroy()
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // 画面
+    Box(
+        modifier = Modifier.fillMaxSize()
+    ) {
+
+        // 地図
         AndroidView(
             factory = { mapView },
             modifier = Modifier.fillMaxSize()
         )
 
-        Surface(
-            color = Color.White.copy(alpha = 0.9f),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(16.dp)
-        ) {
-            Text(
-                text = message,
-                modifier = Modifier.padding(12.dp)
-            )
-        }
-
+        // 国土地理院タイル表示
         Surface(
             color = Color.White.copy(alpha = 0.9f),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(8.dp)
                 .clickable {
+
                     context.startActivity(
                         Intent(
                             Intent.ACTION_VIEW,
-                            Uri.parse("https://maps.gsi.go.jp/development/ichiran.html")
+                            Uri.parse(
+                                "https://maps.gsi.go.jp/development/ichiran.html"
+                            )
                         )
                     )
                 }
         ) {
+
             Text(
                 text = "地理院タイル（国土地理院）",
                 modifier = Modifier.padding(8.dp)
             )
+        }
+
+        // 測定データが選択されている場合だけ詳細表示
+        selectedMeasurement.value?.let { measurement ->
+
+            Surface(
+                color = Color.White.copy(alpha = 0.95f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(8.dp)
+            ) {
+
+                Column(
+                    modifier = Modifier
+                        .padding(16.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+
+                    Text(
+                        text = "水温測定地点"
+                    )
+
+                    Text(
+                        text = "日時：${measurement.measuredAt}"
+                    )
+
+                    Text(
+                        text = "種類：${measurement.measurementType}"
+                    )
+
+                    Text(
+                        text =
+                            "位置：${measurement.latitude}, " +
+                                    "${measurement.longitude}"
+                    )
+
+                    Text(
+                        text = "読み取り数：${measurement.readings.size}件"
+                    )
+
+                    measurement.readings.forEach { reading ->
+
+                        Text(
+                            text =
+                                "深度 ${reading.depthM} m　" +
+                                        "水温 ${reading.waterTemperatureC} ℃"
+                        )
+                    }
+                }
+            }
         }
     }
 }
