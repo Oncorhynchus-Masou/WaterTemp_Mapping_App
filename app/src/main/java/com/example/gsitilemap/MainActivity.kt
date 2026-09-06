@@ -49,6 +49,10 @@ import androidx.compose.runtime.setValue
 import org.maplibre.android.annotations.Marker
 import org.maplibre.android.maps.MapLibreMap
 import androidx.compose.material3.Button
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.layout.offset
 
 
 class MainActivity : ComponentActivity() {
@@ -590,7 +594,10 @@ fun GsiTileMap() {
 
                     Column(
                         modifier = Modifier
-                            .fillMaxWidth()
+                            .fillMaxSize()
+                            .verticalScroll(
+                                rememberScrollState()
+                            )
                             .padding(16.dp)
                     ) {
                         Text(
@@ -611,6 +618,72 @@ fun GsiTileMap() {
                                         } ?: "未記録"
                                     }"
                             )
+                            val readings = measurement.readings.sortedBy {
+                                it.depthM
+                            }
+
+                            val maxDepth = readings.maxOfOrNull {
+                                it.depthM
+                            } ?: 1.0
+
+                            // プロファイル全体の高さ
+                            val profileHeight = (maxDepth * 80).dp
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(profileHeight)
+                            ) {
+
+                                // 線を描画
+                                Canvas(
+                                    modifier = Modifier.fillMaxSize()
+                                ) {
+
+                                    val xLine = 40f
+
+                                    // 水面から地底までの縦線
+                                    drawLine(
+                                        color = Color.Black,
+                                        start = Offset(xLine, 0f),
+                                        end = Offset(xLine, size.height),
+                                        strokeWidth = 4f
+                                    )
+
+                                    readings.forEach { reading ->
+
+                                        val y =
+                                            (reading.depthM / maxDepth).toFloat() *
+                                                    size.height
+
+                                        // 測定位置の横線
+                                        drawLine(
+                                            color = Color.Black,
+                                            start = Offset(xLine, y),
+                                            end = Offset(size.width - 40f, y),
+                                            strokeWidth = 3f
+                                        )
+                                    }
+                                }
+
+                                // 深度・水温を表示
+                                readings.forEach { reading ->
+
+                                    val y =
+                                        (reading.depthM / maxDepth).toFloat() *
+                                                profileHeight.value
+
+                                    Text(
+                                        text =
+                                            "深度 ${reading.depthM} m　" +
+                                                    "水温 ${reading.waterTemperatureC} ℃",
+
+                                        modifier = Modifier
+                                            .padding(start = 50.dp)
+                                            .offset(y = y.dp)
+                                    )
+                                }
+                            }
                         }
                     }
 
