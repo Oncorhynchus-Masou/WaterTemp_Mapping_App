@@ -1,5 +1,6 @@
 package com.example.gsitilemap
 
+import android.R.attr.y
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -53,6 +54,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Size
 
 
 class MainActivity : ComponentActivity() {
@@ -585,8 +589,7 @@ fun GsiTileMap() {
         if (showProfile.value) {
             Surface(
                 color = Color.White,
-                modifier = Modifier
-                    .fillMaxSize()
+                modifier = Modifier.fillMaxSize()
             ) {
                 Box(
                     modifier = Modifier.fillMaxSize()
@@ -598,16 +601,34 @@ fun GsiTileMap() {
                             .verticalScroll(
                                 rememberScrollState()
                             )
-                            .padding(16.dp)
+                            .padding(
+                                start = 16.dp,
+                                top = 16.dp,
+                                end = 16.dp,
+                                bottom = 32.dp
+                            )
                     ) {
+
+                        // =========================
+                        // ヘッダー
+                        // =========================
+
                         Text(
                             text = "水温プロファイル"
+                        )
+
+                        Spacer(
+                            modifier = Modifier.height(8.dp)
                         )
 
                         selectedMeasurement.value?.let { measurement ->
 
                             Text(
                                 text = "日時：${measurement.measuredAt}"
+                            )
+
+                            Spacer(
+                                modifier = Modifier.height(4.dp)
                             )
 
                             Text(
@@ -618,6 +639,11 @@ fun GsiTileMap() {
                                         } ?: "未記録"
                                     }"
                             )
+
+                            Spacer(
+                                modifier = Modifier.height(24.dp)
+                            )
+
                             val readings = measurement.readings.sortedBy {
                                 it.depthM
                             }
@@ -629,13 +655,17 @@ fun GsiTileMap() {
                             // プロファイル全体の高さ
                             val profileHeight = (maxDepth * 80).dp
 
+                            // =========================
+                            // 水温プロファイル
+                            // =========================
+
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .height(profileHeight)
                             ) {
 
-                                // 線を描画
+                                // 線
                                 Canvas(
                                     modifier = Modifier.fillMaxSize()
                                 ) {
@@ -645,32 +675,102 @@ fun GsiTileMap() {
                                     // 水面から地底までの縦線
                                     drawLine(
                                         color = Color.Black,
-                                        start = Offset(xLine, 0f),
-                                        end = Offset(xLine, size.height),
+                                        start = Offset(
+                                            xLine,
+                                            0f
+                                        ),
+                                        end = Offset(
+                                            xLine,
+                                            size.height
+                                        ),
                                         strokeWidth = 4f
                                     )
 
+                                    // 測定点間をグラデーションで塗りつぶす
+                                    readings.zipWithNext().forEach { (upper, lower) ->
+
+                                        val upperY =
+                                            (upper.depthM / maxDepth).toFloat() *
+                                                    size.height
+
+                                        val lowerY =
+                                            (lower.depthM / maxDepth).toFloat() *
+                                                    size.height
+
+                                        val upperColor =
+                                            waterTemperatureColor(
+                                                upper.waterTemperatureC
+                                            )
+
+                                        val lowerColor =
+                                            waterTemperatureColor(
+                                                lower.waterTemperatureC
+                                            )
+
+                                        drawRect(
+                                            brush = Brush.verticalGradient(
+                                                colors = listOf(
+                                                    upperColor,
+                                                    lowerColor
+                                                ),
+                                                startY = upperY,
+                                                endY = lowerY
+                                            ),
+                                            topLeft = Offset(
+                                                xLine,
+                                                upperY
+                                            ),
+                                            size = Size(
+                                                width = size.width - xLine - 40f,
+                                                height = lowerY - upperY
+                                            )
+                                        )
+                                    }
+
+                                    // 測定位置の横線
                                     readings.forEach { reading ->
 
                                         val y =
                                             (reading.depthM / maxDepth).toFloat() *
                                                     size.height
 
-                                        // 測定位置の横線
                                         drawLine(
-                                            color = Color.Black,
-                                            start = Offset(xLine, y),
-                                            end = Offset(size.width - 40f, y),
-                                            strokeWidth = 3f
+                                            color = waterTemperatureColor(
+                                                reading.waterTemperatureC
+                                            ),
+                                            start = Offset(
+                                                xLine,
+                                                y
+                                            ),
+                                            end = Offset(
+                                                size.width - 40f,
+                                                y
+                                            ),
+                                            strokeWidth = 4f
                                         )
                                     }
                                 }
 
-                                // 深度・水温を表示
+                                // =========================
+                                // 水面
+                                // =========================
+
+                                Text(
+                                    text = "水面",
+                                    modifier = Modifier
+                                        .padding(start = 50.dp)
+                                )
+
+                                // =========================
+                                // 測定値
+                                // =========================
+
                                 readings.forEach { reading ->
 
                                     val y =
-                                        (reading.depthM / maxDepth).toFloat() *
+                                        (
+                                                reading.depthM / maxDepth
+                                                ).toFloat() *
                                                 profileHeight.value
 
                                     Text(
@@ -680,12 +780,29 @@ fun GsiTileMap() {
 
                                         modifier = Modifier
                                             .padding(start = 50.dp)
-                                            .offset(y = y.dp)
+                                            .offset(
+                                                y = y.dp
+                                            )
                                     )
                                 }
+
+                                // =========================
+                                // 地底
+                                // =========================
+
+                                Text(
+                                    text = "地底",
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .padding(start = 50.dp)
+                                )
                             }
                         }
                     }
+
+                    // =========================
+                    // 閉じるボタン
+                    // =========================
 
                     Text(
                         text = "×",
@@ -726,3 +843,89 @@ private const val GSI_STYLE = """
   ]
 }
 """
+
+fun waterTemperatureColor(
+    temperature: Double
+): Color {
+
+    val temp = temperature.coerceIn(0.0, 33.0)
+
+    return when {
+        temp <= 5.0 -> {
+            // 紺 → 青
+            val ratio = (temp / 5.0).toFloat()
+
+            Color(
+                red = 0f,
+                green = (50f + 50f * ratio) / 255f,
+                blue = (120f + 135f * ratio) / 255f
+            )
+        }
+
+        temp <= 10.0 -> {
+            // 青 → 水色
+            val ratio = ((temp - 5.0) / 5.0).toFloat()
+
+            Color(
+                red = 0f,
+                green = (100f + 155f * ratio) / 255f,
+                blue = 1f
+            )
+        }
+
+        temp <= 15.0 -> {
+            // 水色 → シアン
+            val ratio = ((temp - 10.0) / 5.0).toFloat()
+
+            Color(
+                red = 0f,
+                green = 1f,
+                blue = 1f - 0.3f * ratio
+            )
+        }
+
+        temp <= 20.0 -> {
+            // シアン → 緑
+            val ratio = ((temp - 15.0) / 5.0).toFloat()
+
+            Color(
+                red = 0f,
+                green = 1f,
+                blue = 0.7f - 0.7f * ratio
+            )
+        }
+
+        temp <= 25.0 -> {
+            // 緑 → 黄
+            val ratio = ((temp - 20.0) / 5.0).toFloat()
+
+            Color(
+                red = ratio,
+                green = 1f,
+                blue = 0f
+            )
+        }
+
+        temp <= 30.0 -> {
+            // 黄 → オレンジ
+            val ratio = ((temp - 25.0) / 5.0).toFloat()
+
+            Color(
+                red = 1f,
+                green = 1f - 0.5f * ratio,
+                blue = 0f
+            )
+        }
+
+        else -> {
+            // オレンジ → 赤
+            val ratio = ((temp - 30.0) / 3.0).toFloat()
+
+            Color(
+                red = 1f,
+                green = 0.5f - 0.5f * ratio,
+                blue = 0f
+            )
+        }
+    }
+}
