@@ -40,6 +40,15 @@ import org.maplibre.android.annotations.MarkerOptions
 import com.example.gsitilemap.model.Measurement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.setValue
+import org.maplibre.android.annotations.Marker
+import org.maplibre.android.maps.MapLibreMap
+import androidx.compose.material3.Button
 
 
 class MainActivity : ComponentActivity() {
@@ -66,6 +75,11 @@ fun GsiTileMap() {
         mutableStateOf<Measurement?>(null)
     }
 
+    // プロファイル表示用の状態を追加
+    val showProfile = remember {
+        mutableStateOf(false)
+    }
+
     // APIから取得した全測定データ
     val allMeasurements = remember {
         mutableStateOf<List<Measurement>>(emptyList())
@@ -73,23 +87,35 @@ fun GsiTileMap() {
 
     // 選択中の年
     val selectedYear = remember {
-        mutableStateOf<String>("すべて")
+        mutableStateOf("すべて")
     }
 
     // 選択中の月
     val selectedMonth = remember {
-        mutableStateOf<String>("すべて")
+        mutableStateOf("すべて")
     }
 
     // マーカーとMeasurementの対応表
     val markerMeasurements = remember {
         mutableMapOf<Long, Measurement>()
     }
-    val mapView = remember {
 
+    // 現在地図に表示しているマーカー
+    val markers = remember {
+        mutableStateListOf<Marker>()
+    }
+
+    // MapLibreMap本体
+    val mapState = remember {
+        mutableStateOf<MapLibreMap?>(null)
+    }
+
+    val mapView = remember {
         MapView(context).apply {
 
             getMapAsync { map ->
+
+                mapState.value = map
 
                 map.setStyle(
                     Style.Builder().fromJson(GSI_STYLE)
@@ -109,8 +135,12 @@ fun GsiTileMap() {
 
                     // マーカーがタップされたとき
                     map.setOnMarkerClickListener { marker ->
+
                         selectedMeasurement.value =
                             markerMeasurements[marker.id.toLong()]
+
+                        showProfile.value = false
+
                         true
                     }
 
@@ -125,7 +155,8 @@ fun GsiTileMap() {
 
                             withContext(Dispatchers.Main) {
 
-                                // 取得件数を確認
+                                allMeasurements.value = measurements
+
                                 android.widget.Toast.makeText(
                                     context,
                                     "API取得成功: ${measurements.size}件",
@@ -146,34 +177,15 @@ fun GsiTileMap() {
                                             )
                                             .zoom(14.0)
                                             .build()
-
-                                    measurements.forEach { measurement ->
-
-                                        val position = LatLng(
-                                            measurement.latitude,
-                                            measurement.longitude
-                                        )
-
-                                        val marker = map.addMarker(
-                                            MarkerOptions()
-                                                .position(position)
-                                                .title("水温測定地点")
-                                                .snippet(
-                                                    "${measurement.measurementType} / " +
-                                                            "${measurement.readings.size}件"
-                                                )
-                                        )
-
-                                        // マーカーと測定データを対応付ける
-                                        markerMeasurements[marker.id.toLong()] = measurement
-                                    }
                                 }
                             }
 
                         } catch (e: Exception) {
+
                             e.printStackTrace()
 
                             withContext(Dispatchers.Main) {
+
                                 android.widget.Toast.makeText(
                                     context,
                                     "API取得失敗: ${e.javaClass.simpleName}\n${e.message}",
@@ -184,6 +196,80 @@ fun GsiTileMap() {
                     }
                 }
             }
+        }
+    }
+
+    // 年月が変更されたらマーカーを更新
+    LaunchedEffect(
+        allMeasurements.value,
+        selectedYear.value,
+        selectedMonth.value,
+        mapState.value
+    ) {
+
+        val map = mapState.value ?: return@LaunchedEffect
+
+        // 現在のマーカーを削除
+        markers.forEach { marker ->
+            map.removeAnnotation(marker)
+        }
+
+        markers.clear()
+        markerMeasurements.clear()
+
+        // フィルター
+        val filteredMeasurements =
+            allMeasurements.value.filter { measurement ->
+
+                val year =
+                    measurement.measuredAt.substring(0, 4)
+
+                val month =
+                    measurement.measuredAt.substring(5, 7)
+
+                val yearMatches =
+                    selectedYear.value == "すべて" ||
+                            year == selectedYear.value
+
+                val monthMatches =
+                    selectedMonth.value == "すべて" ||
+                            month == selectedMonth.value
+
+                yearMatches && monthMatches
+            }
+
+        // フィルター後のデータからマーカーを作成
+        filteredMeasurements.forEach { measurement ->
+
+            val position = LatLng(
+                measurement.latitude,
+                measurement.longitude
+            )
+
+            val marker = map.addMarker(
+                MarkerOptions()
+                    .position(position)
+                    .title("水温測定地点")
+                    .snippet(
+                        "${measurement.measurementType} / " +
+                                "${measurement.readings.size}件"
+                    )
+            )
+
+            markers.add(marker)
+
+            markerMeasurements[
+                marker.id.toLong()
+            ] = measurement
+        }
+
+        // 現在選択しているデータが
+        // フィルター対象外になった場合は閉じる
+        if (
+            selectedMeasurement.value != null &&
+            selectedMeasurement.value !in filteredMeasurements
+        ) {
+            selectedMeasurement.value = null
         }
     }
 
@@ -245,13 +331,154 @@ fun GsiTileMap() {
         modifier = Modifier.fillMaxSize()
     ) {
 
-        // 地図
+        // ① 地図
         AndroidView(
             factory = { mapView },
             modifier = Modifier.fillMaxSize()
         )
 
-        // 国土地理院タイル表示
+        // ② 年月フィルター
+        Surface(
+            color = Color.White.copy(alpha = 0.95f),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 240.dp)
+        ) {
+
+            androidx.compose.foundation.layout.Row(
+                modifier = Modifier.padding(8.dp)
+            ) {
+
+                // 年
+                var yearExpanded by remember {
+                    mutableStateOf(false)
+                }
+
+                Box {
+
+                    Text(
+                        text = "年：${selectedYear.value}",
+                        modifier = Modifier
+                            .clickable {
+                                yearExpanded = true
+                            }
+                            .padding(8.dp)
+                    )
+
+                    DropdownMenu(
+                        expanded = yearExpanded,
+                        onDismissRequest = {
+                            yearExpanded = false
+                        }
+                    ) {
+
+                        DropdownMenuItem(
+                            text = {
+                                Text("すべて")
+                            },
+                            onClick = {
+
+                                selectedYear.value =
+                                    "すべて"
+
+                                yearExpanded = false
+                            }
+                        )
+
+                        allMeasurements.value
+                            .map {
+                                it.measuredAt
+                                    .substring(0, 4)
+                            }
+                            .distinct()
+                            .sortedDescending()
+                            .forEach { year ->
+
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(year)
+                                    },
+                                    onClick = {
+
+                                        selectedYear.value =
+                                            year
+
+                                        yearExpanded = false
+                                    }
+                                )
+                            }
+                    }
+                }
+
+                // 月
+                var monthExpanded by remember {
+                    mutableStateOf(false)
+                }
+
+                Box {
+
+                    Text(
+                        text = "月：${
+                            if (
+                                selectedMonth.value ==
+                                "すべて"
+                            ) {
+                                "すべて"
+                            } else {
+                                "${selectedMonth.value.toInt()}月"
+                            }
+                        }",
+                        modifier = Modifier
+                            .clickable {
+                                monthExpanded = true
+                            }
+                            .padding(8.dp)
+                    )
+
+                    DropdownMenu(
+                        expanded = monthExpanded,
+                        onDismissRequest = {
+                            monthExpanded = false
+                        }
+                    ) {
+
+                        DropdownMenuItem(
+                            text = {
+                                Text("すべて")
+                            },
+                            onClick = {
+
+                                selectedMonth.value =
+                                    "すべて"
+
+                                monthExpanded = false
+                            }
+                        )
+
+                        (1..12).forEach { month ->
+
+                            DropdownMenuItem(
+                                text = {
+                                    Text("${month}月")
+                                },
+                                onClick = {
+
+                                    selectedMonth.value =
+                                        month
+                                            .toString()
+                                            .padStart(2, '0')
+
+                                    monthExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // ③ 国土地理院タイル表示
         Surface(
             color = Color.White.copy(alpha = 0.9f),
             modifier = Modifier
@@ -276,7 +503,7 @@ fun GsiTileMap() {
             )
         }
 
-        // 測定データが選択されている場合だけ詳細表示
+        // ④ 測定データ詳細
         selectedMeasurement.value?.let { measurement ->
 
             Surface(
@@ -290,7 +517,9 @@ fun GsiTileMap() {
                 Column(
                     modifier = Modifier
                         .padding(16.dp)
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(
+                            rememberScrollState()
+                        )
                 ) {
 
                     Text(
@@ -298,11 +527,13 @@ fun GsiTileMap() {
                     )
 
                     Text(
-                        text = "日時：${measurement.measuredAt}"
+                        text =
+                            "日時：${measurement.measuredAt}"
                     )
 
                     Text(
-                        text = "種類：${measurement.measurementType}"
+                        text =
+                            "種類：${measurement.measurementType}"
                     )
 
                     Text(
@@ -312,11 +543,17 @@ fun GsiTileMap() {
                     )
 
                     Text(
-                        text = "気温：${measurement.airTemperatureC?.let { "$it ℃" } ?: "未記録"}"
+                        text =
+                            "気温：${
+                                measurement.airTemperatureC?.let {
+                                    "$it ℃"
+                                } ?: "未記録"
+                            }"
                     )
 
                     Text(
-                        text = "読み取り数：${measurement.readings.size}件"
+                        text =
+                            "読み取り数：${measurement.readings.size}件"
                     )
 
                     measurement.readings.forEach { reading ->
@@ -327,9 +564,69 @@ fun GsiTileMap() {
                                         "水温 ${reading.waterTemperatureC} ℃"
                         )
                     }
+
+                    if (measurement.measurementType == "profile") {
+                        Button(
+                            onClick = {
+                                showProfile.value = true
+                            }
+                        ) {
+                            Text("水温プロファイルを見る")
+                        }
+                    }
                 }
             }
         }
+
+        if (showProfile.value) {
+            Surface(
+                color = Color.White,
+                modifier = Modifier
+                    .fillMaxSize()
+            ) {
+                Box(
+                    modifier = Modifier.fillMaxSize()
+                ) {
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            text = "水温プロファイル"
+                        )
+
+                        selectedMeasurement.value?.let { measurement ->
+
+                            Text(
+                                text = "日時：${measurement.measuredAt}"
+                            )
+
+                            Text(
+                                text =
+                                    "気温：${
+                                        measurement.airTemperatureC?.let {
+                                            "$it ℃"
+                                        } ?: "未記録"
+                                    }"
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "×",
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .clickable {
+                                showProfile.value = false
+                            }
+                            .padding(16.dp)
+                    )
+                }
+            }
+        }
+
     }
 }
 
