@@ -57,6 +57,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.geometry.Size
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 
 
 class MainActivity : ComponentActivity() {
@@ -86,6 +88,16 @@ fun GsiTileMap() {
     // プロファイル表示用の状態を追加
     val showProfile = remember {
         mutableStateOf(false)
+    }
+
+    // プロファイル上で選択された実測深度
+    val selectedProfileDepth = remember {
+        mutableStateOf<Double?>(null)
+    }
+
+    // プロファイル上で選択された実測水温
+    val selectedProfileTemperature = remember {
+        mutableStateOf<Double?>(null)
     }
 
     // APIから取得した全測定データ
@@ -149,6 +161,12 @@ fun GsiTileMap() {
 
                         showProfile.value = false
 
+                        true
+                    }
+
+                    map.addOnMapClickListener { _ ->
+                        selectedMeasurement.value = null
+                        showProfile.value = false
                         true
                     }
 
@@ -595,33 +613,33 @@ fun GsiTileMap() {
                     modifier = Modifier.fillMaxSize()
                 ) {
 
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(
-                                rememberScrollState()
+                    selectedMeasurement.value?.let { measurement ->
+
+                        val readings = measurement.readings.sortedBy {
+                            it.depthM
+                        }
+
+                        val maxDepth = readings.maxOfOrNull {
+                            it.depthM
+                        } ?: 1.0
+
+                        Column(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(16.dp)
+                        ) {
+
+                            // =========================
+                            // ヘッダー
+                            // =========================
+
+                            Text(
+                                text = "水温プロファイル"
                             )
-                            .padding(
-                                start = 16.dp,
-                                top = 16.dp,
-                                end = 16.dp,
-                                bottom = 32.dp
+
+                            Spacer(
+                                modifier = Modifier.height(8.dp)
                             )
-                    ) {
-
-                        // =========================
-                        // ヘッダー
-                        // =========================
-
-                        Text(
-                            text = "水温プロファイル"
-                        )
-
-                        Spacer(
-                            modifier = Modifier.height(8.dp)
-                        )
-
-                        selectedMeasurement.value?.let { measurement ->
 
                             Text(
                                 text = "日時：${measurement.measuredAt}"
@@ -641,61 +659,102 @@ fun GsiTileMap() {
                             )
 
                             Spacer(
-                                modifier = Modifier.height(24.dp)
+                                modifier = Modifier.height(16.dp)
                             )
 
-                            val readings = measurement.readings.sortedBy {
-                                it.depthM
-                            }
-
-                            val maxDepth = readings.maxOfOrNull {
-                                it.depthM
-                            } ?: 1.0
-
-                            // プロファイル全体の高さ
-                            val profileHeight = (maxDepth * 80).dp
-
                             // =========================
-                            // 水温プロファイル
+                            // プロファイル領域
                             // =========================
 
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(profileHeight)
+                                    .weight(1f)
                             ) {
-
-                                // 線
                                 Canvas(
-                                    modifier = Modifier.fillMaxSize()
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .pointerInput(readings) {
+                                            detectTapGestures { offset ->
+
+                                                // タップ位置から深度を計算
+                                                val tappedDepth =
+                                                    (offset.y / size.height) * maxDepth
+
+                                                // 最も近い実測データを探す
+                                                val nearestReading =
+                                                    readings.minByOrNull { reading ->
+                                                        kotlin.math.abs(
+                                                            reading.depthM - tappedDepth
+                                                        )
+                                                    }
+
+                                                // 選択した実測値を保存
+                                                nearestReading?.let { reading ->
+
+                                                    selectedProfileDepth.value =
+                                                        reading.depthM
+
+                                                    selectedProfileTemperature.value =
+                                                        reading.waterTemperatureC
+                                                }
+                                            }
+                                        }
                                 ) {
+                                    // -----------------------------
+                                    // レイアウト
+                                    // -----------------------------
+                                    val axisX = 32.dp.toPx()
+                                    val profileStartX = 72.dp.toPx()
+                                    val rightMargin = 16.dp.toPx()
 
-                                    val xLine = 40f
+                                    val smallTickLength = 16.dp.toPx()
+                                    val middleTickLength = 28.dp.toPx()
 
-                                    // 水面から地底までの縦線
+                                    // -----------------------------
+                                    // 縦軸
+                                    // -----------------------------
                                     drawLine(
                                         color = Color.Black,
-                                        start = Offset(
-                                            xLine,
-                                            0f
-                                        ),
-                                        end = Offset(
-                                            xLine,
-                                            size.height
-                                        ),
-                                        strokeWidth = 4f
+                                        start = Offset(axisX, 0f),
+                                        end = Offset(axisX, size.height),
+                                        strokeWidth = 3.dp.toPx()
                                     )
 
-                                    // 測定点間をグラデーションで塗りつぶす
+                                    // -----------------------------
+                                    // 目盛り
+                                    // 水面～底を10等分
+                                    // -----------------------------
+                                    for (i in 0..10) {
+                                        val y = i / 10f * size.height
+
+                                        val tickLength =
+                                            if (i == 5) {
+                                                middleTickLength
+                                            } else {
+                                                smallTickLength
+                                            }
+
+                                        drawLine(
+                                            color = Color.Black,
+                                            start = Offset(axisX, y),
+                                            end = Offset(axisX + tickLength, y),
+                                            strokeWidth = 3.dp.toPx()
+                                        )
+                                    }
+
+                                    // -----------------------------
+                                    // 水温プロファイル
+                                    // -----------------------------
                                     readings.zipWithNext().forEach { (upper, lower) ->
 
                                         val upperY =
-                                            (upper.depthM / maxDepth).toFloat() *
-                                                    size.height
+                                            (upper.depthM / maxDepth)
+                                                .toFloat() * size.height
 
                                         val lowerY =
-                                            (lower.depthM / maxDepth).toFloat() *
-                                                    size.height
+                                            (lower.depthM / maxDepth)
+                                                .toFloat() * size.height
 
                                         val upperColor =
                                             waterTemperatureColor(
@@ -717,85 +776,109 @@ fun GsiTileMap() {
                                                 endY = lowerY
                                             ),
                                             topLeft = Offset(
-                                                xLine,
+                                                profileStartX,
                                                 upperY
                                             ),
                                             size = Size(
-                                                width = size.width - xLine - 40f,
+                                                width = size.width -
+                                                        profileStartX -
+                                                        rightMargin,
                                                 height = lowerY - upperY
                                             )
                                         )
                                     }
 
-                                    // 測定位置の横線
+                                    // -----------------------------
+                                    // 実測点
+                                    // -----------------------------
                                     readings.forEach { reading ->
 
                                         val y =
-                                            (reading.depthM / maxDepth).toFloat() *
-                                                    size.height
+                                            (reading.depthM / maxDepth)
+                                                .toFloat() * size.height
 
                                         drawLine(
                                             color = waterTemperatureColor(
                                                 reading.waterTemperatureC
                                             ),
                                             start = Offset(
-                                                xLine,
+                                                profileStartX,
                                                 y
                                             ),
                                             end = Offset(
-                                                size.width - 40f,
+                                                size.width - rightMargin,
                                                 y
                                             ),
-                                            strokeWidth = 4f
+                                            strokeWidth = 4.dp.toPx()
                                         )
                                     }
                                 }
 
-                                // =========================
+                                // -----------------------------
                                 // 水面
-                                // =========================
-
-                                Text(
-                                    text = "水面",
+                                // -----------------------------
+                                Surface(
+                                    color = Color.White.copy(alpha = 0.9f),
                                     modifier = Modifier
-                                        .padding(start = 50.dp)
-                                )
-
-                                // =========================
-                                // 測定値
-                                // =========================
-
-                                readings.forEach { reading ->
-
-                                    val y =
-                                        (
-                                                reading.depthM / maxDepth
-                                                ).toFloat() *
-                                                profileHeight.value
-
+                                        .align(Alignment.TopStart)
+                                        .padding(start = 76.dp)
+                                ) {
                                     Text(
-                                        text =
-                                            "深度 ${reading.depthM} m　" +
-                                                    "水温 ${reading.waterTemperatureC} ℃",
-
-                                        modifier = Modifier
-                                            .padding(start = 50.dp)
-                                            .offset(
-                                                y = y.dp
-                                            )
+                                        text = "水面",
+                                        modifier = Modifier.padding(
+                                            horizontal = 4.dp,
+                                            vertical = 2.dp
+                                        )
                                     )
                                 }
 
-                                // =========================
-                                // 地底
-                                // =========================
-
-                                Text(
-                                    text = "地底",
+                                // -----------------------------
+                                // 底・最深深度
+                                // -----------------------------
+                                Surface(
+                                    color = Color.White.copy(alpha = 0.9f),
                                     modifier = Modifier
                                         .align(Alignment.BottomStart)
-                                        .padding(start = 50.dp)
-                                )
+                                        .padding(start = 76.dp)
+                                ) {
+                                    Text(
+                                        text = "底　${maxDepth} m",
+                                        modifier = Modifier.padding(
+                                            horizontal = 4.dp,
+                                            vertical = 2.dp
+                                        )
+                                    )
+                                }
+                                // -----------------------------
+                                // 選択された実測値
+                                // -----------------------------
+                                selectedProfileDepth.value?.let { depth ->
+
+                                    val temperature =
+                                        selectedProfileTemperature.value
+
+                                    Surface(
+                                        color = Color.White.copy(alpha = 0.95f),
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .padding(
+                                                top = 16.dp,
+                                                end = 32.dp
+                                            )
+                                    ) {
+                                        Column(
+                                            modifier = Modifier.padding(10.dp)
+                                        ) {
+                                            Text(
+                                                text = "深度：${depth} m"
+                                            )
+
+                                            Text(
+                                                text = "水温：${temperature} ℃"
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
