@@ -10,6 +10,9 @@ data class Measurement(
 
     val longitude: Double,
 
+    @SerializedName("air_temperature_c")
+    val airTemperatureC: Double?,
+
     @SerializedName("measurement_type")
     val measurementType: String,
 

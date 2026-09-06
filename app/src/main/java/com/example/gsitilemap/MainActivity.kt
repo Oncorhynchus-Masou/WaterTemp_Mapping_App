@@ -66,6 +66,21 @@ fun GsiTileMap() {
         mutableStateOf<Measurement?>(null)
     }
 
+    // APIから取得した全測定データ
+    val allMeasurements = remember {
+        mutableStateOf<List<Measurement>>(emptyList())
+    }
+
+    // 選択中の年
+    val selectedYear = remember {
+        mutableStateOf<String>("すべて")
+    }
+
+    // 選択中の月
+    val selectedMonth = remember {
+        mutableStateOf<String>("すべて")
+    }
+
     // マーカーとMeasurementの対応表
     val markerMeasurements = remember {
         mutableMapOf<Long, Measurement>()
@@ -161,7 +176,7 @@ fun GsiTileMap() {
                             withContext(Dispatchers.Main) {
                                 android.widget.Toast.makeText(
                                     context,
-                                    "API取得失敗: ${e.message}",
+                                    "API取得失敗: ${e.javaClass.simpleName}\n${e.message}",
                                     android.widget.Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -294,6 +309,10 @@ fun GsiTileMap() {
                         text =
                             "位置：${measurement.latitude}, " +
                                     "${measurement.longitude}"
+                    )
+
+                    Text(
+                        text = "気温：${measurement.airTemperatureC?.let { "$it ℃" } ?: "未記録"}"
                     )
 
                     Text(
