@@ -1,6 +1,5 @@
 package com.example.gsitilemap
 
-import android.R.attr.y
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -59,6 +58,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.shape.CircleShape
 
 
 class MainActivity : ComponentActivity() {
@@ -87,6 +87,11 @@ fun GsiTileMap() {
 
     // プロファイル表示用の状態を追加
     val showProfile = remember {
+        mutableStateOf(false)
+    }
+
+    // 測定登録画面を表示するか
+    val showRegistration = remember {
         mutableStateOf(false)
     }
 
@@ -504,7 +509,27 @@ fun GsiTileMap() {
             }
         }
 
-        // ③ 国土地理院タイル表示
+        // ③ 測定登録ボタン
+        Surface(
+            color = Color.White.copy(alpha = 0.95f),
+            shape = CircleShape,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(
+                    end = 8.dp,
+                    bottom = 60.dp
+                )
+                .clickable {
+                    showRegistration.value = true
+                }
+        ) {
+            Text(
+                text = "＋",
+                modifier = Modifier.padding(14.dp)
+            )
+        }
+
+        // ④ 国土地理院タイル表示
         Surface(
             color = Color.White.copy(alpha = 0.9f),
             modifier = Modifier
@@ -529,7 +554,7 @@ fun GsiTileMap() {
             )
         }
 
-        // ④ 測定データ詳細
+        // ⑤ 測定データ詳細
         selectedMeasurement.value?.let { measurement ->
 
             Surface(
