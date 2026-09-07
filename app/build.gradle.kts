@@ -61,4 +61,5 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
 
     implementation("org.maplibre.gl:android-sdk:11.13.5")
+    implementation("com.google.android.gms:play-services-location:21.3.0")
 }

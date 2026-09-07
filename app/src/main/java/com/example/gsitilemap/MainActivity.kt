@@ -59,6 +59,17 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.CircleShape
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
+import androidx.activity.compose.rememberLauncherForActivityResult
+import android.annotation.SuppressLint
+import android.location.Location
+import com.google.android.gms.location.FusedLocationProviderClient
 
 
 class MainActivity : ComponentActivity() {
@@ -78,6 +89,40 @@ class MainActivity : ComponentActivity() {
 fun GsiTileMap() {
 
     val context = LocalContext.current
+    val fusedLocationClient = remember {
+        LocationServices.getFusedLocationProviderClient(context)
+    }
+
+    val currentLatitude = remember { mutableStateOf<Double?>(null) }
+    val currentLongitude = remember { mutableStateOf<Double?>(null) }
+    val currentAccuracy = remember { mutableStateOf<Float?>(null) }
+    val locationMessage = remember { mutableStateOf("位置情報を取得していません") }
+
+    val locationPermissionLauncher =
+        rememberLauncherForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions()
+        ) { permissions ->
+            val granted =
+                permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
+                        permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+
+            if (granted) {
+                getCurrentLocation(
+                    fusedLocationClient = fusedLocationClient,
+                    onLocationReceived = { location ->
+                        currentLatitude.value = location.latitude
+                        currentLongitude.value = location.longitude
+                        currentAccuracy.value = location.accuracy
+                        locationMessage.value = "位置情報取得成功"
+                    },
+                    onError = {
+                        locationMessage.value = "位置情報の取得に失敗しました"
+                    }
+                )
+            } else {
+                locationMessage.value = "位置情報の権限がありません"
+            }
+        }
     val lifecycleOwner = LocalLifecycleOwner.current
 
     // 現在選択されている測定データ
@@ -629,6 +674,69 @@ fun GsiTileMap() {
             }
         }
 
+        //テストボタン
+        Button(
+            onClick = {
+                val fineGranted = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+
+                val coarseGranted = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+
+                if (fineGranted || coarseGranted) {
+                    getCurrentLocation(
+                        fusedLocationClient = fusedLocationClient,
+                        onLocationReceived = { location ->
+                            currentLatitude.value = location.latitude
+                            currentLongitude.value = location.longitude
+                            currentAccuracy.value = location.accuracy
+                            locationMessage.value = "位置情報取得成功"
+                        },
+                        onError = {
+                            locationMessage.value = "位置情報の取得に失敗しました"
+                        }
+                    )
+                } else {
+                    locationPermissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    )
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 60.dp)
+        ) {
+            Text("現在地を取得")
+        }
+
+        // テストの結果表示
+        Column(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 120.dp)
+        ) {
+            Text(locationMessage.value)
+
+            currentLatitude.value?.let {
+                Text("緯度: $it")
+            }
+
+            currentLongitude.value?.let {
+                Text("経度: $it")
+            }
+
+            currentAccuracy.value?.let {
+                Text("水平精度: %.1f m".format(it))
+            }
+        }
+
         if (showProfile.value) {
             Surface(
                 color = Color.White,
@@ -1035,5 +1143,27 @@ fun waterTemperatureColor(
                 blue = 0f
             )
         }
+    }
+}
+
+@SuppressLint("MissingPermission")
+fun getCurrentLocation(
+    fusedLocationClient: FusedLocationProviderClient,
+    onLocationReceived: (Location) -> Unit,
+    onError: () -> Unit
+) {
+    val cancellationTokenSource = CancellationTokenSource()
+
+    fusedLocationClient.getCurrentLocation(
+        Priority.PRIORITY_HIGH_ACCURACY,
+        cancellationTokenSource.token
+    ).addOnSuccessListener { location ->
+        if (location != null) {
+            onLocationReceived(location)
+        } else {
+            onError()
+        }
+    }.addOnFailureListener {
+        onError()
     }
 }
