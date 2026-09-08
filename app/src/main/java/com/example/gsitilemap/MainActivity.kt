@@ -37,7 +37,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.maplibre.android.annotations.MarkerOptions
-import com.example.gsitilemap.model.Measurement
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
@@ -70,6 +69,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import android.annotation.SuppressLint
 import android.location.Location
 import com.google.android.gms.location.FusedLocationProviderClient
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
+import com.example.gsitilemap.model.Measurement
+import com.example.gsitilemap.model.MeasurementCreate
+import com.example.gsitilemap.model.ReadingCreate
 
 
 class MainActivity : ComponentActivity() {
@@ -98,6 +106,11 @@ fun GsiTileMap() {
     val currentAccuracy = remember { mutableStateOf<Float?>(null) }
     val locationMessage = remember { mutableStateOf("位置情報を取得していません") }
 
+    // 登録画面用
+    val registrationLatitude = remember { mutableStateOf("") }
+    val registrationLongitude = remember { mutableStateOf("") }
+    val registrationAccuracy = remember { mutableStateOf<Float?>(null) }
+
     val locationPermissionLauncher =
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
@@ -110,10 +123,21 @@ fun GsiTileMap() {
                 getCurrentLocation(
                     fusedLocationClient = fusedLocationClient,
                     onLocationReceived = { location ->
+
                         currentLatitude.value = location.latitude
                         currentLongitude.value = location.longitude
                         currentAccuracy.value = location.accuracy
                         locationMessage.value = "位置情報取得成功"
+
+                        // 登録画面用
+                        registrationLatitude.value =
+                            location.latitude.toString()
+
+                        registrationLongitude.value =
+                            location.longitude.toString()
+
+                        registrationAccuracy.value =
+                            location.accuracy
                     },
                     onError = {
                         locationMessage.value = "位置情報の取得に失敗しました"
@@ -139,6 +163,44 @@ fun GsiTileMap() {
     val showRegistration = remember {
         mutableStateOf(false)
     }
+
+    // 測定タイプ
+    val registrationType = remember {
+        mutableStateOf("spot")
+    }
+
+    // スポット測定の水温
+    val registrationTemperature = remember {
+        mutableStateOf("")
+    }
+
+    // 測定場所
+    val registrationMeasuredAt = remember {
+        mutableStateOf("")
+    }
+
+    // 登録中のメッセージ
+    val registrationMessage = remember {
+        mutableStateOf("")
+    }
+
+    //
+    val isRegistering = remember {
+        mutableStateOf(false)
+    }
+
+    // 選択されたCSVファイル
+    val selectedCsvUri = remember {
+        mutableStateOf<Uri?>(null)
+    }
+
+    // CSVファイル選択
+    val csvFileLauncher =
+        rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument()
+        ) { uri ->
+            selectedCsvUri.value = uri
+        }
 
     // プロファイル上で選択された実測深度
     val selectedProfileDepth = remember {
@@ -565,6 +627,22 @@ fun GsiTileMap() {
                     bottom = 60.dp
                 )
                 .clickable {
+
+                    val now = java.text.SimpleDateFormat(
+                        "yyyy-MM-dd HH:mm:ss",
+                        java.util.Locale.getDefault()
+                    ).format(java.util.Date())
+
+                    registrationMeasuredAt.value = now
+
+                    // 新しい登録なので、以前の位置情報をリセット
+                    registrationLatitude.value = ""
+                    registrationLongitude.value = ""
+                    registrationAccuracy.value = null
+
+                    registrationTemperature.value = ""
+                    selectedCsvUri.value = null
+
                     showRegistration.value = true
                 }
         ) {
@@ -1033,6 +1111,502 @@ fun GsiTileMap() {
             }
         }
 
+        // =========================
+        // 測定登録画面
+        // =========================
+
+        if (showRegistration.value) {
+
+            Surface(
+                color = Color.White,
+                modifier = Modifier.fillMaxSize()
+            ) {
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(20.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
+
+                    // -------------------------
+                    // ヘッダー
+                    // -------------------------
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp)
+                    ) {
+
+                        Text(
+                            text = "測定登録",
+                            modifier = Modifier.align(Alignment.CenterStart)
+                        )
+
+                        IconButton(
+                            onClick = {
+                                showRegistration.value = false
+                            },
+                            modifier = Modifier.align(Alignment.CenterEnd)
+                        ) {
+                            Text("×")
+                        }
+                    }
+
+                    Spacer(
+                        modifier = Modifier.height(24.dp)
+                    )
+
+                    Text(
+                        text = "測定日時"
+                    )
+
+                    Spacer(
+                        modifier = Modifier.height(8.dp)
+                    )
+
+                    OutlinedTextField(
+                        value = registrationMeasuredAt.value,
+                        onValueChange = {
+                            registrationMeasuredAt.value = it
+                        },
+                        label = {
+                            Text("測定日時")
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    Spacer(
+                        modifier = Modifier.height(24.dp)
+                    )
+
+                    Text(
+                        text = "測定位置"
+                    )
+
+                    Spacer(
+                        modifier = Modifier.height(8.dp)
+                    )
+
+                    Button(
+                        onClick = {
+
+                            val hasFineLocation =
+                                ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.ACCESS_FINE_LOCATION
+                                ) == PackageManager.PERMISSION_GRANTED
+
+                            val hasCoarseLocation =
+                                ContextCompat.checkSelfPermission(
+                                    context,
+                                    Manifest.permission.ACCESS_COARSE_LOCATION
+                                ) == PackageManager.PERMISSION_GRANTED
+
+                            if (hasFineLocation || hasCoarseLocation) {
+
+                                getCurrentLocation(
+                                    fusedLocationClient = fusedLocationClient,
+                                    onLocationReceived = { location ->
+
+                                        registrationLatitude.value =
+                                            location.latitude.toString()
+
+                                        registrationLongitude.value =
+                                            location.longitude.toString()
+
+                                        registrationAccuracy.value =
+                                            location.accuracy
+                                    },
+                                    onError = {
+                                        // 今回は何もしない
+                                    }
+                                )
+
+                            } else {
+
+                                locationPermissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.ACCESS_FINE_LOCATION,
+                                        Manifest.permission.ACCESS_COARSE_LOCATION
+                                    )
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("現在地を取得")
+                    }
+
+                    Spacer(
+                        modifier = Modifier.height(8.dp)
+                    )
+
+                    if (registrationLatitude.value.isNotBlank() &&
+                        registrationLongitude.value.isNotBlank()
+                    ){
+
+                        OutlinedTextField(
+                            value = registrationLatitude.value,
+                            onValueChange = {
+                                registrationLatitude.value = it
+                            },
+                            label = {
+                                Text("緯度")
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        Spacer(
+                            modifier = Modifier.height(8.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = registrationLongitude.value,
+                            onValueChange = {
+                                registrationLongitude.value = it
+                            },
+                            label = {
+                                Text("経度")
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        registrationAccuracy.value?.let { accuracy ->
+
+                            Text(
+                                text = "水平精度: %.1f m".format(
+                                    accuracy
+                                )
+                            )
+                        }
+
+                    } else {
+
+                        Text(
+                            text = "位置情報が取得されていません"
+                        )
+                    }
+
+                    // -------------------------
+                    // 測定タイプ
+                    // -------------------------
+
+                    Text(
+                        text = "測定タイプ"
+                    )
+
+                    Spacer(
+                        modifier = Modifier.height(8.dp)
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+
+                        RadioButton(
+                            selected = registrationType.value == "spot",
+                            onClick = {
+                                registrationType.value = "spot"
+                            }
+                        )
+
+                        Text(
+                            text = "スポット"
+                        )
+
+                        Spacer(
+                            modifier = Modifier.padding(horizontal = 12.dp)
+                        )
+
+                        RadioButton(
+                            selected = registrationType.value == "profile",
+                            onClick = {
+                                registrationType.value = "profile"
+                            }
+                        )
+
+                        Text(
+                            text = "プロファイル"
+                        )
+                    }
+
+                    Spacer(
+                        modifier = Modifier.height(24.dp)
+                    )
+
+                    // -------------------------
+                    // スポット測定
+                    // -------------------------
+
+                    if (registrationType.value == "spot") {
+
+                        Text(
+                            text = "水温"
+                        )
+
+                        Spacer(
+                            modifier = Modifier.height(8.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = registrationTemperature.value,
+                            onValueChange = {
+                                registrationTemperature.value = it
+                            },
+                            label = {
+                                Text("水温（℃）")
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    // -------------------------
+                    // プロファイル測定
+                    // -------------------------
+
+                    if (registrationType.value == "profile") {
+
+                        Text(
+                            text = "プロファイルCSV"
+                        )
+
+                        Spacer(
+                            modifier = Modifier.height(8.dp)
+                        )
+
+                        Button(
+                            onClick = {
+                                csvFileLauncher.launch(
+                                    arrayOf(
+                                        "text/csv",
+                                        "text/comma-separated-values",
+                                        "application/csv",
+                                        "text/plain"
+                                    )
+                                )
+                            }
+                        ) {
+                            Text("CSVファイルを選択")
+                        }
+
+                        Spacer(
+                            modifier = Modifier.height(12.dp)
+                        )
+
+                        Text(
+                            text = selectedCsvUri.value?.let { uri ->
+                                uri.lastPathSegment
+                                    ?: "CSVファイルが選択されています"
+                            } ?: "CSVファイルが選択されていません"
+                        )
+                    }
+
+                    Spacer(
+                        modifier = Modifier.height(32.dp)
+                    )
+
+                    HorizontalDivider()
+
+                    Spacer(
+                        modifier = Modifier.height(24.dp)
+                    )
+
+                    if (registrationMessage.value.isNotBlank()) {
+
+                        Text(
+                            text = registrationMessage.value
+                        )
+
+                        Spacer(
+                            modifier = Modifier.height(12.dp)
+                        )
+                    }
+
+                    // -------------------------
+                    // 登録ボタン
+                    // -------------------------
+
+                    Button(
+                        onClick = {
+
+                            // ---------------------------------
+                            // 入力チェック
+                            // ---------------------------------
+
+                            val latitude =
+                                registrationLatitude.value.toDoubleOrNull()
+
+                            val longitude =
+                                registrationLongitude.value.toDoubleOrNull()
+
+                            val temperature =
+                                registrationTemperature.value.toDoubleOrNull()
+
+                            when {
+
+                                registrationMeasuredAt.value.isBlank() -> {
+                                    registrationMessage.value =
+                                        "測定日時を入力してください"
+                                }
+
+                                latitude == null ||
+                                        latitude !in -90.0..90.0 -> {
+                                    registrationMessage.value =
+                                        "緯度を正しく入力してください"
+                                }
+
+                                longitude == null ||
+                                        longitude !in -180.0..180.0 -> {
+                                    registrationMessage.value =
+                                        "経度を正しく入力してください"
+                                }
+
+                                temperature == null ||
+                                        temperature !in -10.0..60.0 -> {
+                                    registrationMessage.value =
+                                        "水温を正しく入力してください"
+                                }
+
+                                registrationType.value != "spot" -> {
+                                    registrationMessage.value =
+                                        "現在はスポット測定のみ登録できます"
+                                }
+
+                                else -> {
+
+                                    // ---------------------------------
+                                    // 登録データ作成
+                                    // ---------------------------------
+
+                                    val measurement = MeasurementCreate(
+
+                                        measuredAt =
+                                            registrationMeasuredAt.value,
+
+                                        latitude =
+                                            latitude,
+
+                                        longitude =
+                                            longitude,
+
+                                        airTemperatureC =
+                                            null,
+
+                                        positionSource =
+                                            "smartphone",
+
+                                        positioningMode =
+                                            null,
+
+                                        horizontalAccuracyM =
+                                            registrationAccuracy.value?.toDouble(),
+
+                                        verticalAccuracyM =
+                                            null,
+
+                                        satelliteCount =
+                                            null,
+
+                                        deviceName =
+                                            "Android smartphone",
+
+                                        measurementType =
+                                            "spot",
+
+                                        readings =
+                                            listOf(
+                                                ReadingCreate(
+                                                    depthM = 0.0,
+                                                    depthUncertaintyM = null,
+                                                    waterTemperatureC =
+                                                        temperature,
+                                                    depthType =
+                                                        "surface"
+                                                )
+                                            )
+                                    )
+
+                                    // ---------------------------------
+                                    // API登録
+                                    // ---------------------------------
+
+                                    isRegistering.value = true
+                                    registrationMessage.value =
+                                        "登録しています..."
+
+                                    CoroutineScope(Dispatchers.IO).launch {
+
+                                        try {
+
+                                            val registeredMeasurement =
+                                                RetrofitClient.apiService
+                                                    .createMeasurement(
+                                                        measurement
+                                                    )
+
+                                            // 最新データを再取得
+                                            val measurements =
+                                                RetrofitClient.apiService
+                                                    .getMeasurements()
+
+                                            withContext(Dispatchers.Main) {
+
+                                                allMeasurements.value =
+                                                    measurements
+
+                                                isRegistering.value = false
+
+                                                registrationMessage.value =
+                                                    "登録成功"
+
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "測定データを登録しました",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+
+                                                // 登録画面を閉じる
+                                                showRegistration.value =
+                                                    false
+                                            }
+
+                                        } catch (e: Exception) {
+
+                                            e.printStackTrace()
+
+                                            withContext(Dispatchers.Main) {
+
+                                                isRegistering.value = false
+
+                                                registrationMessage.value =
+                                                    "登録失敗: ${e.message}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        enabled = !isRegistering.value,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text =
+                                if (isRegistering.value) {
+                                    "登録中..."
+                                } else {
+                                    "登録"
+                                }
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
