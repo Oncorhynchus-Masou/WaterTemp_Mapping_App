@@ -48,9 +48,6 @@ data class Reading(
 
     @SerializedName("water_temperature_c")
     val waterTemperatureC: Double,
-
-    @SerializedName("depth_type")
-    val depthType: String
 )
 
 data class MeasurementCreate(
@@ -97,7 +94,4 @@ data class ReadingCreate(
 
     @SerializedName("water_temperature_c")
     val waterTemperatureC: Double,
-
-    @SerializedName("depth_type")
-    val depthType: String
 )

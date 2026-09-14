@@ -164,14 +164,16 @@ fun GsiTileMap() {
         mutableStateOf(false)
     }
 
-    // 測定タイプ
-    val registrationType = remember {
-        mutableStateOf("spot")
+    // 気温
+    val registrationAirTemperature = remember {
+        mutableStateOf("")
     }
 
-    // スポット測定の水温
-    val registrationTemperature = remember {
-        mutableStateOf("")
+    // 深度・水温の入力行
+    val registrationReadings = remember {
+        mutableStateListOf(
+            Pair("0.0", "")
+        )
     }
 
     // 測定場所
@@ -640,7 +642,11 @@ fun GsiTileMap() {
                     registrationLongitude.value = ""
                     registrationAccuracy.value = null
 
-                    registrationTemperature.value = ""
+                    registrationAirTemperature.value = ""
+                    registrationReadings.clear()
+                    registrationReadings.add(
+                        Pair("0.0", "")
+                    )
                     selectedCsvUri.value = null
 
                     showRegistration.value = true
@@ -1293,118 +1299,86 @@ fun GsiTileMap() {
                     }
 
                     // -------------------------
-                    // 測定タイプ
+                    // 気温データ
+                    // -------------------------
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    OutlinedTextField(
+                        value = registrationAirTemperature.value,
+                        onValueChange = {
+                            registrationAirTemperature.value = it
+                        },
+                        label = {
+                            Text("気温（℃）")
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // -------------------------
+                    // 手動測定データ
                     // -------------------------
 
                     Text(
-                        text = "測定タイプ"
+                        text = "水温測定データ"
                     )
 
                     Spacer(
                         modifier = Modifier.height(8.dp)
                     )
 
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    registrationReadings.forEachIndexed { index, reading ->
 
-                        RadioButton(
-                            selected = registrationType.value == "spot",
-                            onClick = {
-                                registrationType.value = "spot"
-                            }
-                        )
-
-                        Text(
-                            text = "スポット"
-                        )
-
-                        Spacer(
-                            modifier = Modifier.padding(horizontal = 12.dp)
-                        )
-
-                        RadioButton(
-                            selected = registrationType.value == "profile",
-                            onClick = {
-                                registrationType.value = "profile"
-                            }
-                        )
-
-                        Text(
-                            text = "プロファイル"
-                        )
-                    }
-
-                    Spacer(
-                        modifier = Modifier.height(24.dp)
-                    )
-
-                    // -------------------------
-                    // スポット測定
-                    // -------------------------
-
-                    if (registrationType.value == "spot") {
-
-                        Text(
-                            text = "水温"
-                        )
-
-                        Spacer(
-                            modifier = Modifier.height(8.dp)
-                        )
-
-                        OutlinedTextField(
-                            value = registrationTemperature.value,
-                            onValueChange = {
-                                registrationTemperature.value = it
-                            },
-                            label = {
-                                Text("水温（℃）")
-                            },
-                            singleLine = true,
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-
-                    // -------------------------
-                    // プロファイル測定
-                    // -------------------------
-
-                    if (registrationType.value == "profile") {
-
-                        Text(
-                            text = "プロファイルCSV"
-                        )
-
-                        Spacer(
-                            modifier = Modifier.height(8.dp)
-                        )
-
-                        Button(
-                            onClick = {
-                                csvFileLauncher.launch(
-                                    arrayOf(
-                                        "text/csv",
-                                        "text/comma-separated-values",
-                                        "application/csv",
-                                        "text/plain"
-                                    )
-                                )
-                            }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text("CSVファイルを選択")
+
+                            OutlinedTextField(
+                                value = reading.first,
+                                onValueChange = { value ->
+
+                                    registrationReadings[index] =
+                                        Pair(value, reading.second)
+                                },
+                                label = {
+                                    Text("深度（m）")
+                                },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            OutlinedTextField(
+                                value = reading.second,
+                                onValueChange = { value ->
+
+                                    registrationReadings[index] =
+                                        Pair(reading.first, value)
+                                },
+                                label = {
+                                    Text("水温（℃）")
+                                },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
                         }
 
                         Spacer(
-                            modifier = Modifier.height(12.dp)
+                            modifier = Modifier.height(8.dp)
                         )
+                    }
 
-                        Text(
-                            text = selectedCsvUri.value?.let { uri ->
-                                uri.lastPathSegment
-                                    ?: "CSVファイルが選択されています"
-                            } ?: "CSVファイルが選択されていません"
-                        )
+                    Button(
+                        onClick = {
+
+                            registrationReadings.add(
+                                Pair("", "")
+                            )
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("データを追加")
                     }
 
                     Spacer(
@@ -1445,8 +1419,16 @@ fun GsiTileMap() {
                             val longitude =
                                 registrationLongitude.value.toDoubleOrNull()
 
-                            val temperature =
-                                registrationTemperature.value.toDoubleOrNull()
+                            val airTemperature =
+                                registrationAirTemperature.value.toDoubleOrNull()
+
+                            val readings = registrationReadings.mapIndexed { index, reading ->
+
+                                val depth = reading.first.toDoubleOrNull()
+                                val temperature = reading.second.toDoubleOrNull()
+
+                                Pair(depth, temperature)
+                            }
 
                             when {
 
@@ -1467,18 +1449,33 @@ fun GsiTileMap() {
                                         "経度を正しく入力してください"
                                 }
 
-                                temperature == null ||
-                                        temperature !in -10.0..60.0 -> {
+                                airTemperature == null ||
+                                        airTemperature !in -50.0..60.0 -> {
+                                    registrationMessage.value =
+                                        "気温を正しく入力してください"
+                                }
+
+                                readings.any { reading ->
+                                    val depth = reading.first
+
+                                    depth == null ||
+                                            depth !in 0.0..10000.0
+                                } -> {
+                                    registrationMessage.value =
+                                        "深度を正しく入力してください"
+                                }
+
+                                readings.any { reading ->
+                                    val temperature = reading.second
+
+                                    temperature == null ||
+                                            temperature !in -10.0..60.0
+                                } -> {
                                     registrationMessage.value =
                                         "水温を正しく入力してください"
                                 }
 
-                                registrationType.value != "spot" -> {
-                                    registrationMessage.value =
-                                        "現在はスポット測定のみ登録できます"
-                                }
-
-                                else -> {
+                                else ->  {
 
                                     // ---------------------------------
                                     // 登録データ作成
@@ -1496,7 +1493,7 @@ fun GsiTileMap() {
                                             longitude,
 
                                         airTemperatureC =
-                                            null,
+                                            airTemperature,
 
                                         positionSource =
                                             "smartphone",
@@ -1517,19 +1514,24 @@ fun GsiTileMap() {
                                             "Android smartphone",
 
                                         measurementType =
-                                            "spot",
+                                            if (readings.size == 1) {
+                                                "spot"
+                                            } else {
+                                                "profile"
+                                            },
 
                                         readings =
-                                            listOf(
+                                            readings.map { reading ->
+
+                                                val depth = reading.first ?: 0.0
+                                                val temperature = reading.second ?: 0.0
+
                                                 ReadingCreate(
-                                                    depthM = 0.0,
+                                                    depthM = depth,
                                                     depthUncertaintyM = null,
-                                                    waterTemperatureC =
-                                                        temperature,
-                                                    depthType =
-                                                        "surface"
+                                                    waterTemperatureC = temperature
                                                 )
-                                            )
+                                            }
                                     )
 
                                     // ---------------------------------
