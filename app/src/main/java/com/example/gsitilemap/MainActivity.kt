@@ -78,6 +78,8 @@ import androidx.compose.material3.IconButton
 import com.example.gsitilemap.model.Measurement
 import com.example.gsitilemap.model.MeasurementCreate
 import com.example.gsitilemap.model.ReadingCreate
+import android.content.Context
+import com.example.gsitilemap.model.LoginRequest
 
 
 class MainActivity : ComponentActivity() {
@@ -88,13 +90,201 @@ class MainActivity : ComponentActivity() {
         MapLibre.getInstance(applicationContext)
 
         setContent {
-            GsiTileMap()
+            AppRoot()
         }
     }
 }
 
 @Composable
-fun GsiTileMap() {
+fun AppRoot() {
+
+    val context = LocalContext.current
+
+    val preferences = remember {
+        context.getSharedPreferences(
+            "app_preferences",
+            Context.MODE_PRIVATE
+        )
+    }
+
+    var accessToken by remember {
+        mutableStateOf(
+            preferences.getString("access_token", null)
+        )
+    }
+
+    if (accessToken.isNullOrBlank()) {
+
+        LoginScreen(
+            onLoginSuccess = { token ->
+
+                preferences.edit()
+                    .putString("access_token", token)
+                    .apply()
+
+                accessToken = token
+            }
+        )
+
+    } else {
+        GsiTileMap(accessToken = accessToken!!)
+    }
+}
+
+@Composable
+fun LoginScreen(
+    onLoginSuccess: (String) -> Unit
+) {
+
+    var email by remember {
+        mutableStateOf("")
+    }
+
+    var password by remember {
+        mutableStateOf("")
+    }
+
+    var message by remember {
+        mutableStateOf("")
+    }
+
+    var isLoggingIn by remember {
+        mutableStateOf(false)
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = Color.White
+    ) {
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+
+            Text(
+                text = "水温マップ"
+            )
+
+            Spacer(
+                modifier = Modifier.height(32.dp)
+            )
+
+            OutlinedTextField(
+                value = email,
+                onValueChange = {
+                    email = it
+                },
+                label = {
+                    Text("メールアドレス")
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(
+                modifier = Modifier.height(16.dp)
+            )
+
+            OutlinedTextField(
+                value = password,
+                onValueChange = {
+                    password = it
+                },
+                label = {
+                    Text("パスワード")
+                },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(
+                modifier = Modifier.height(24.dp)
+            )
+
+            if (message.isNotBlank()) {
+
+                Text(
+                    text = message
+                )
+
+                Spacer(
+                    modifier = Modifier.height(12.dp)
+                )
+            }
+
+            Button(
+                onClick = {
+
+                    if (
+                        email.isBlank() ||
+                        password.isBlank()
+                    ) {
+                        message =
+                            "メールアドレスとパスワードを入力してください"
+
+                        return@Button
+                    }
+
+                    isLoggingIn = true
+                    message = "ログインしています..."
+
+                    CoroutineScope(Dispatchers.IO).launch {
+
+                        try {
+
+                            val response =
+                                RetrofitClient.apiService.login(
+                                    LoginRequest(
+                                        email = email,
+                                        password = password
+                                    )
+                                )
+
+                            withContext(Dispatchers.Main) {
+
+                                isLoggingIn = false
+
+                                onLoginSuccess(
+                                    response.accessToken
+                                )
+                            }
+
+                        } catch (e: Exception) {
+
+                            e.printStackTrace()
+
+                            withContext(Dispatchers.Main) {
+
+                                isLoggingIn = false
+
+                                message =
+                                    "ログイン失敗: ${e.message}"
+                            }
+                        }
+                    }
+                },
+                enabled = !isLoggingIn,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+
+                Text(
+                    text =
+                        if (isLoggingIn) {
+                            "ログイン中..."
+                        } else {
+                            "ログイン"
+                        }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun GsiTileMap(accessToken: String) {
 
     val context = LocalContext.current
     val fusedLocationClient = remember {
@@ -1546,11 +1736,11 @@ fun GsiTileMap() {
 
                                         try {
 
-                                            val registeredMeasurement =
-                                                RetrofitClient.apiService
-                                                    .createMeasurement(
-                                                        measurement
-                                                    )
+                                            // 修正後
+                                            val registeredMeasurement = RetrofitClient.apiService.createMeasurement(
+                                                authorization = "Bearer $accessToken",
+                                                measurement = measurement
+                                            )
 
                                             // 最新データを再取得
                                             val measurements =
