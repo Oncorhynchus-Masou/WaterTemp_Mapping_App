@@ -1,4 +1,4 @@
-package com.example.gsitilemap.model
+package com.example.watertemperaturemap.model
 
 import com.google.gson.annotations.SerializedName
 

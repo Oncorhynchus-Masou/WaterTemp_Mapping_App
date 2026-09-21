@@ -19,6 +19,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "GsiTileMap"
+rootProject.name = "WaterTemperatureMap"
 include(":app")
  

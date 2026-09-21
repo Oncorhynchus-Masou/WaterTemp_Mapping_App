@@ -1,4 +1,4 @@
-package com.example.gsitilemap.api
+package com.example.watertemperaturemap.api
 
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory

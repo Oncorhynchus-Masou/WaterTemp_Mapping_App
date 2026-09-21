@@ -1,4 +1,4 @@
-package com.example.gsitilemap
+package com.example.watertemperaturemap
 
 import android.content.Intent
 import android.net.Uri
@@ -31,7 +31,7 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import androidx.compose.runtime.mutableStateOf
-import com.example.gsitilemap.api.RetrofitClient
+import com.example.watertemperaturemap.api.RetrofitClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -75,11 +75,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
-import com.example.gsitilemap.model.Measurement
-import com.example.gsitilemap.model.MeasurementCreate
-import com.example.gsitilemap.model.ReadingCreate
+import com.example.watertemperaturemap.model.Measurement
+import com.example.watertemperaturemap.model.MeasurementCreate
+import com.example.watertemperaturemap.model.ReadingCreate
 import android.content.Context
-import com.example.gsitilemap.model.LoginRequest
+import com.example.watertemperaturemap.model.LoginRequest
 
 
 class MainActivity : ComponentActivity() {
@@ -127,7 +127,7 @@ fun AppRoot() {
         )
 
     } else {
-        GsiTileMap(accessToken = accessToken!!)
+        WaterTemperatureMap(accessToken = accessToken!!)
     }
 }
 
@@ -284,7 +284,7 @@ fun LoginScreen(
 }
 
 @Composable
-fun GsiTileMap(accessToken: String) {
+fun WaterTemperatureMap(accessToken: String) {
 
     val context = LocalContext.current
     val fusedLocationClient = remember {

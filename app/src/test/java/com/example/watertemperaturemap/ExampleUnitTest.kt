@@ -1,4 +1,4 @@
-package com.example.gsitilemap
+package com.example.watertemperaturemap
 
 import org.junit.Test
 

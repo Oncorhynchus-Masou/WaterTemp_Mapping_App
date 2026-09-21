@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.gsitilemap"
+    namespace = "com.example.watertemperaturemap"
     compileSdk = 37
 
     defaultConfig {

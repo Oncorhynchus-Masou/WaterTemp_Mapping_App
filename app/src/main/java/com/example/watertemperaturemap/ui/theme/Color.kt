@@ -1,4 +1,4 @@
-package com.example.gsitilemap.ui.theme
+package com.example.watertemperaturemap.ui.theme
 
 import androidx.compose.ui.graphics.Color
 

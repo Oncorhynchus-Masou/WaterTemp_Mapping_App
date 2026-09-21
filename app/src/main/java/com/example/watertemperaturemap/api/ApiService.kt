@@ -1,10 +1,10 @@
 // ApiService.kt
-package com.example.gsitilemap.api
+package com.example.watertemperaturemap.api
 
-import com.example.gsitilemap.model.LoginRequest
-import com.example.gsitilemap.model.LoginResponse
-import com.example.gsitilemap.model.Measurement
-import com.example.gsitilemap.model.MeasurementCreate
+import com.example.watertemperaturemap.model.LoginRequest
+import com.example.watertemperaturemap.model.LoginResponse
+import com.example.watertemperaturemap.model.Measurement
+import com.example.watertemperaturemap.model.MeasurementCreate
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header

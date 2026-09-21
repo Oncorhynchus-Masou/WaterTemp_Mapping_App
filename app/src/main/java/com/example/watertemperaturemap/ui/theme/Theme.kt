@@ -1,6 +1,5 @@
-package com.example.gsitilemap.ui.theme
+package com.example.watertemperaturemap.ui.theme
 
-import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
