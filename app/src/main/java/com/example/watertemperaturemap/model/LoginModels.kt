@@ -21,8 +21,25 @@ data class LoginResponse(
     @SerializedName("access_token")
     val accessToken: String,
 
+    @SerializedName("refresh_token")
+    val refreshToken: String,
+
     @SerializedName("token_type")
     val tokenType: String,
 
     val user: UserInfo
+)
+// /auth/refresh に送るRefresh Token
+data class RefreshRequest(
+    @SerializedName("refresh_token")
+    val refreshToken: String
+)
+
+// /auth/refresh から返る新しいAccess Token
+data class RefreshResponse(
+    @SerializedName("access_token")
+    val accessToken: String,
+
+    @SerializedName("token_type")
+    val tokenType: String
 )

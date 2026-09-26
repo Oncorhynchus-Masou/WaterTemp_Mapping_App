@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -32,6 +33,7 @@ import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
 import androidx.compose.runtime.mutableStateOf
 import com.example.watertemperaturemap.api.RetrofitClient
+import com.example.watertemperaturemap.api.SessionManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -80,12 +82,16 @@ import com.example.watertemperaturemap.model.MeasurementCreate
 import com.example.watertemperaturemap.model.ReadingCreate
 import android.content.Context
 import com.example.watertemperaturemap.model.LoginRequest
+import com.example.watertemperaturemap.model.LoginResponse
+import com.example.watertemperaturemap.model.RefreshRequest
 
 
 class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        RetrofitClient.initialize(applicationContext)
 
         MapLibre.getInstance(applicationContext)
 
@@ -100,6 +106,8 @@ fun AppRoot() {
 
     val context = LocalContext.current
 
+    val sessionExpired by SessionManager.sessionExpired.collectAsState()
+
     val preferences = remember {
         context.getSharedPreferences(
             "app_preferences",
@@ -108,32 +116,108 @@ fun AppRoot() {
     }
 
     var accessToken by remember {
-        mutableStateOf(
-            preferences.getString("access_token", null)
-        )
+        mutableStateOf(preferences.getString("access_token", null))
+    }
+
+    var refreshToken by remember {
+        mutableStateOf(preferences.getString("refresh_token", null))
+    }
+
+    LaunchedEffect(sessionExpired) {
+        if (sessionExpired) {
+            preferences.edit().remove("access_token").remove("refresh_token").apply()
+            accessToken = null
+            refreshToken = null
+            SessionManager.resetSessionExpired()
+        }
     }
 
     if (accessToken.isNullOrBlank()) {
 
         LoginScreen(
-            onLoginSuccess = { token ->
+            onLoginSuccess = { response ->
 
                 preferences.edit()
-                    .putString("access_token", token)
+                    .putString("access_token", response.accessToken)
+                    .putString("refresh_token", response.refreshToken)
                     .apply()
 
-                accessToken = token
+                SessionManager.resetSessionExpired()
+                accessToken = response.accessToken
+                refreshToken = response.refreshToken
             }
         )
 
     } else {
-        WaterTemperatureMap(accessToken = accessToken!!)
+        var isRefreshing by remember { mutableStateOf(false) }
+
+        Box(modifier = Modifier.fillMaxSize()) {
+            WaterTemperatureMap(accessToken = accessToken!!)
+
+            Button(
+                onClick = {
+                    val savedRefreshToken = refreshToken
+                    if (savedRefreshToken.isNullOrBlank()) {
+                        android.widget.Toast.makeText(
+                            context,
+                            "Refresh Tokenが保存されていません。いったんログインし直してください。",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                        return@Button
+                    }
+
+                    isRefreshing = true
+                    CoroutineScope(Dispatchers.IO).launch {
+                        try {
+                            val response = RetrofitClient.apiService.refreshToken(
+                                RefreshRequest(refreshToken = savedRefreshToken)
+                            )
+
+                            preferences.edit()
+                                .putString("access_token", response.accessToken)
+                                .apply()
+
+                            withContext(Dispatchers.Main) {
+                                accessToken = response.accessToken
+                                isRefreshing = false
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Access Tokenを更新しました",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        } catch (e: Exception) {
+                            val refreshRejected = e is retrofit2.HttpException &&
+                                (e.code() == 401 || e.code() == 403)
+                            if (refreshRejected) {
+                                preferences.edit().remove("access_token").remove("refresh_token").apply()
+                                SessionManager.notifySessionExpired()
+                            }
+                            withContext(Dispatchers.Main) {
+                                isRefreshing = false
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "トークン更新失敗: ${e.message}",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                },
+                enabled = !isRefreshing,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp)
+            ) {
+                Text(if (isRefreshing) "更新中..." else "トークン更新を確認")
+            }
+        }
     }
 }
 
 @Composable
 fun LoginScreen(
-    onLoginSuccess: (String) -> Unit
+    onLoginSuccess: (LoginResponse) -> Unit
 ) {
 
     var email by remember {
@@ -247,9 +331,7 @@ fun LoginScreen(
 
                                 isLoggingIn = false
 
-                                onLoginSuccess(
-                                    response.accessToken
-                                )
+                                onLoginSuccess(response)
                             }
 
                         } catch (e: Exception) {
@@ -1933,3 +2015,6 @@ fun getCurrentLocation(
         onError()
     }
 }
+
+
+
