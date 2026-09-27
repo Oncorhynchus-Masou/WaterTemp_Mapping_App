@@ -105,22 +105,72 @@ class MainActivity : ComponentActivity() {
 fun AppRoot() {
 
     val context = LocalContext.current
-
     val sessionExpired by SessionManager.sessionExpired.collectAsState()
 
     val preferences = remember {
-        context.getSharedPreferences(
-            "app_preferences",
-            Context.MODE_PRIVATE
-        )
+        context.getSharedPreferences("app_preferences", Context.MODE_PRIVATE)
     }
 
     var accessToken by remember {
         mutableStateOf(preferences.getString("access_token", null))
     }
-
     var refreshToken by remember {
         mutableStateOf(preferences.getString("refresh_token", null))
+    }
+    var isCheckingSession by remember {
+        mutableStateOf(!accessToken.isNullOrBlank())
+    }
+    var startupError by remember { mutableStateOf<String?>(null) }
+    var startupAttempt by remember { mutableStateOf(0) }
+
+    LaunchedEffect(startupAttempt) {
+        if (accessToken.isNullOrBlank()) {
+            isCheckingSession = false
+            return@LaunchedEffect
+        }
+
+        val savedRefreshToken = refreshToken
+        if (savedRefreshToken.isNullOrBlank()) {
+            preferences.edit().remove("access_token").remove("refresh_token").apply()
+            accessToken = null
+            refreshToken = null
+            isCheckingSession = false
+            return@LaunchedEffect
+        }
+
+        isCheckingSession = true
+        startupError = null
+
+        try {
+            val response = withContext(Dispatchers.IO) {
+                RetrofitClient.apiService.refreshToken(
+                    RefreshRequest(refreshToken = savedRefreshToken)
+                )
+            }
+
+            preferences.edit()
+                .putString("access_token", response.accessToken)
+                .apply()
+            accessToken = response.accessToken
+        } catch (e: Exception) {
+            val refreshRejected = e is retrofit2.HttpException &&
+                (e.code() == 401 || e.code() == 403)
+
+            if (refreshRejected) {
+                preferences.edit()
+                    .remove("access_token")
+                    .remove("refresh_token")
+                    .apply()
+                accessToken = null
+                refreshToken = null
+                SessionManager.resetSessionExpired()
+            } else {
+                // Preserve the stored tokens for temporary network/server failures.
+                startupError = "ログイン状態を確認できませんでした。通信を確認して再試行してください。"
+            }
+        } finally {
+            isCheckingSession = false
+        }
     }
 
     LaunchedEffect(sessionExpired) {
@@ -128,88 +178,74 @@ fun AppRoot() {
             preferences.edit().remove("access_token").remove("refresh_token").apply()
             accessToken = null
             refreshToken = null
+            isCheckingSession = false
             SessionManager.resetSessionExpired()
         }
     }
 
-    if (accessToken.isNullOrBlank()) {
-
-        LoginScreen(
-            onLoginSuccess = { response ->
-
-                preferences.edit()
-                    .putString("access_token", response.accessToken)
-                    .putString("refresh_token", response.refreshToken)
-                    .apply()
-
-                SessionManager.resetSessionExpired()
-                accessToken = response.accessToken
-                refreshToken = response.refreshToken
+    when {
+        isCheckingSession -> {
+            Surface(modifier = Modifier.fillMaxSize(), color = Color.White) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("ログイン状態を確認しています...")
+                }
             }
-        )
+        }
 
-    } else {
-        var isRefreshing by remember { mutableStateOf(false) }
-
-        Box(modifier = Modifier.fillMaxSize()) {
-            WaterTemperatureMap(accessToken = accessToken!!)
-
-            Button(
-                onClick = {
-                    val savedRefreshToken = refreshToken
-                    if (savedRefreshToken.isNullOrBlank()) {
-                        android.widget.Toast.makeText(
-                            context,
-                            "Refresh Tokenが保存されていません。いったんログインし直してください。",
-                            android.widget.Toast.LENGTH_LONG
-                        ).show()
-                        return@Button
+        startupError != null -> {
+            Surface(modifier = Modifier.fillMaxSize(), color = Color.White) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    verticalArrangement = Arrangement.Center,
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(startupError!!)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Button(onClick = { startupAttempt += 1 }) {
+                        Text("再試行")
                     }
+                }
+            }
+        }
 
-                    isRefreshing = true
-                    CoroutineScope(Dispatchers.IO).launch {
-                        try {
-                            val response = RetrofitClient.apiService.refreshToken(
-                                RefreshRequest(refreshToken = savedRefreshToken)
-                            )
+        accessToken.isNullOrBlank() -> {
+            LoginScreen(
+                onLoginSuccess = { response ->
+                    preferences.edit()
+                        .putString("access_token", response.accessToken)
+                        .putString("refresh_token", response.refreshToken)
+                        .apply()
 
-                            preferences.edit()
-                                .putString("access_token", response.accessToken)
-                                .apply()
+                    SessionManager.resetSessionExpired()
+                    startupError = null
+                    accessToken = response.accessToken
+                    refreshToken = response.refreshToken
+                }
+            )
+        }
 
-                            withContext(Dispatchers.Main) {
-                                accessToken = response.accessToken
-                                isRefreshing = false
-                                android.widget.Toast.makeText(
-                                    context,
-                                    "Access Tokenを更新しました",
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        } catch (e: Exception) {
-                            val refreshRejected = e is retrofit2.HttpException &&
-                                (e.code() == 401 || e.code() == 403)
-                            if (refreshRejected) {
-                                preferences.edit().remove("access_token").remove("refresh_token").apply()
-                                SessionManager.notifySessionExpired()
-                            }
-                            withContext(Dispatchers.Main) {
-                                isRefreshing = false
-                                android.widget.Toast.makeText(
-                                    context,
-                                    "トークン更新失敗: ${e.message}",
-                                    android.widget.Toast.LENGTH_LONG
-                                ).show()
-                            }
-                        }
-                    }
-                },
-                enabled = !isRefreshing,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-            ) {
-                Text(if (isRefreshing) "更新中..." else "トークン更新を確認")
+        else -> {
+            Box(modifier = Modifier.fillMaxSize()) {
+                WaterTemperatureMap(accessToken = accessToken!!)
+
+                Button(
+                    onClick = {
+                        preferences.edit()
+                            .remove("access_token")
+                            .remove("refresh_token")
+                            .apply()
+                        accessToken = null
+                        refreshToken = null
+                        SessionManager.resetSessionExpired()
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(top = 64.dp, end = 8.dp)
+                ) {
+                    Text("ログアウト")
+                }
             }
         }
     }
@@ -373,11 +409,6 @@ fun WaterTemperatureMap(accessToken: String) {
         LocationServices.getFusedLocationProviderClient(context)
     }
 
-    val currentLatitude = remember { mutableStateOf<Double?>(null) }
-    val currentLongitude = remember { mutableStateOf<Double?>(null) }
-    val currentAccuracy = remember { mutableStateOf<Float?>(null) }
-    val locationMessage = remember { mutableStateOf("位置情報を取得していません") }
-
     // 登録画面用
     val registrationLatitude = remember { mutableStateOf("") }
     val registrationLongitude = remember { mutableStateOf("") }
@@ -396,11 +427,6 @@ fun WaterTemperatureMap(accessToken: String) {
                     fusedLocationClient = fusedLocationClient,
                     onLocationReceived = { location ->
 
-                        currentLatitude.value = location.latitude
-                        currentLongitude.value = location.longitude
-                        currentAccuracy.value = location.accuracy
-                        locationMessage.value = "位置情報取得成功"
-
                         // 登録画面用
                         registrationLatitude.value =
                             location.latitude.toString()
@@ -412,11 +438,9 @@ fun WaterTemperatureMap(accessToken: String) {
                             location.accuracy
                     },
                     onError = {
-                        locationMessage.value = "位置情報の取得に失敗しました"
                     }
                 )
             } else {
-                locationMessage.value = "位置情報の権限がありません"
             }
         }
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -522,6 +546,15 @@ fun WaterTemperatureMap(accessToken: String) {
             getMapAsync { map ->
 
                 mapState.value = map
+
+                val compassMargins = map.uiSettings
+                val density = context.resources.displayMetrics.density
+                compassMargins.setCompassMargins(
+                    compassMargins.getCompassMarginLeft(),
+                    compassMargins.getCompassMarginTop() + (112 * density).toInt(),
+                    compassMargins.getCompassMarginRight(),
+                    compassMargins.getCompassMarginBottom()
+                )
 
                 map.setStyle(
                     Style.Builder().fromJson(GSI_STYLE)
@@ -755,7 +788,7 @@ fun WaterTemperatureMap(accessToken: String) {
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 240.dp)
+                .padding(start = 8.dp, top = 64.dp, bottom = 8.dp, end = 180.dp)
         ) {
 
             androidx.compose.foundation.layout.Row(
@@ -1027,69 +1060,6 @@ fun WaterTemperatureMap(accessToken: String) {
                         }
                     }
                 }
-            }
-        }
-
-        //テストボタン
-        Button(
-            onClick = {
-                val fineGranted = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED
-
-                val coarseGranted = ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-                ) == PackageManager.PERMISSION_GRANTED
-
-                if (fineGranted || coarseGranted) {
-                    getCurrentLocation(
-                        fusedLocationClient = fusedLocationClient,
-                        onLocationReceived = { location ->
-                            currentLatitude.value = location.latitude
-                            currentLongitude.value = location.longitude
-                            currentAccuracy.value = location.accuracy
-                            locationMessage.value = "位置情報取得成功"
-                        },
-                        onError = {
-                            locationMessage.value = "位置情報の取得に失敗しました"
-                        }
-                    )
-                } else {
-                    locationPermissionLauncher.launch(
-                        arrayOf(
-                            Manifest.permission.ACCESS_FINE_LOCATION,
-                            Manifest.permission.ACCESS_COARSE_LOCATION
-                        )
-                    )
-                }
-            },
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 60.dp)
-        ) {
-            Text("現在地を取得")
-        }
-
-        // テストの結果表示
-        Column(
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 120.dp)
-        ) {
-            Text(locationMessage.value)
-
-            currentLatitude.value?.let {
-                Text("緯度: $it")
-            }
-
-            currentLongitude.value?.let {
-                Text("経度: $it")
-            }
-
-            currentAccuracy.value?.let {
-                Text("水平精度: %.1f m".format(it))
             }
         }
 
@@ -2015,6 +1985,9 @@ fun getCurrentLocation(
         onError()
     }
 }
+
+
+
 
 
 
