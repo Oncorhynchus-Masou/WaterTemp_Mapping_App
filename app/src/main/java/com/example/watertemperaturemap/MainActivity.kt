@@ -150,8 +150,10 @@ fun AppRoot() {
 
             preferences.edit()
                 .putString("access_token", response.accessToken)
+                .putString("refresh_token", response.refreshToken)
                 .apply()
             accessToken = response.accessToken
+            refreshToken = response.refreshToken
         } catch (e: Exception) {
             val refreshRejected = e is retrofit2.HttpException &&
                 (e.code() == 401 || e.code() == 403)
@@ -232,6 +234,7 @@ fun AppRoot() {
 
                 Button(
                     onClick = {
+                        val tokenToRevoke = preferences.getString("refresh_token", null)
                         preferences.edit()
                             .remove("access_token")
                             .remove("refresh_token")
@@ -239,6 +242,24 @@ fun AppRoot() {
                         accessToken = null
                         refreshToken = null
                         SessionManager.resetSessionExpired()
+
+                        if (!tokenToRevoke.isNullOrBlank()) {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                try {
+                                    RetrofitClient.apiService.logout(
+                                        RefreshRequest(refreshToken = tokenToRevoke)
+                                    )
+                                } catch (_: Exception) {
+                                    withContext(Dispatchers.Main) {
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "端末からはログアウトしました。サーバーへ失効を通知できませんでした。",
+                                            android.widget.Toast.LENGTH_LONG
+                                        ).show()
+                                    }
+                                }
+                            }
+                        }
                     },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
@@ -413,7 +434,29 @@ fun WaterTemperatureMap(accessToken: String) {
     val registrationLatitude = remember { mutableStateOf("") }
     val registrationLongitude = remember { mutableStateOf("") }
     val registrationAccuracy = remember { mutableStateOf<Float?>(null) }
+    val isPickingLocation = remember { mutableStateOf(false) }
+    val pickerSelectedLocation = remember { mutableStateOf<LatLng?>(null) }
+    val pickerInitialLocation = remember { mutableStateOf<LatLng?>(null) }
+    val pickerAccuracy = remember { mutableStateOf<Float?>(null) }
+    val showGpsAccuracyWarning = remember { mutableStateOf(false) }
+    fun beginLocationPicker(initialLocation: LatLng?, accuracy: Float?) {
+        pickerInitialLocation.value = initialLocation
+        pickerAccuracy.value = accuracy
+        pickerSelectedLocation.value = initialLocation
+        showGpsAccuracyWarning.value = false
+        isPickingLocation.value = true
+    }
 
+    fun finishLocationSelection(point: LatLng, keepGpsAccuracy: Boolean) {
+        registrationLatitude.value = point.latitude.toString()
+        registrationLongitude.value = point.longitude.toString()
+        registrationAccuracy.value = if (keepGpsAccuracy) pickerAccuracy.value else null
+        pickerSelectedLocation.value = null
+        pickerInitialLocation.value = null
+        pickerAccuracy.value = null
+        showGpsAccuracyWarning.value = false
+        isPickingLocation.value = false
+    }
     val locationPermissionLauncher =
         rememberLauncherForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions()
@@ -426,16 +469,10 @@ fun WaterTemperatureMap(accessToken: String) {
                 getCurrentLocation(
                     fusedLocationClient = fusedLocationClient,
                     onLocationReceived = { location ->
-
-                        // 登録画面用
-                        registrationLatitude.value =
-                            location.latitude.toString()
-
-                        registrationLongitude.value =
-                            location.longitude.toString()
-
-                        registrationAccuracy.value =
+                        beginLocationPicker(
+                            LatLng(location.latitude, location.longitude),
                             location.accuracy
+                        )
                     },
                     onError = {
                     }
@@ -584,9 +621,17 @@ fun WaterTemperatureMap(accessToken: String) {
                     }
 
                     map.addOnMapClickListener { _ ->
-                        selectedMeasurement.value = null
-                        showProfile.value = false
+                        if (!isPickingLocation.value) {
+                            selectedMeasurement.value = null
+                            showProfile.value = false
+                        }
                         true
+                    }
+
+                    map.addOnCameraIdleListener {
+                        if (isPickingLocation.value) {
+                            pickerSelectedLocation.value = map.cameraPosition.target
+                        }
                     }
 
                     // FastAPIからデータ取得
@@ -642,6 +687,22 @@ fun WaterTemperatureMap(accessToken: String) {
                 }
             }
         }
+    }
+
+    LaunchedEffect(
+        isPickingLocation.value,
+        pickerInitialLocation.value,
+        mapState.value
+    ) {
+        if (!isPickingLocation.value) return@LaunchedEffect
+
+        val map = mapState.value ?: return@LaunchedEffect
+        val target = pickerInitialLocation.value ?: map.cameraPosition.target
+        pickerSelectedLocation.value = target
+        map.cameraPosition = CameraPosition.Builder()
+            .target(target)
+            .zoom(maxOf(map.cameraPosition.zoom, 16.0))
+            .build()
     }
 
     // 年月が変更されたらマーカーを更新
@@ -782,6 +843,7 @@ fun WaterTemperatureMap(accessToken: String) {
             modifier = Modifier.fillMaxSize()
         )
 
+        if (!isPickingLocation.value) {
         // ② 年月フィルター
         Surface(
             color = Color.White.copy(alpha = 0.95f),
@@ -1458,15 +1520,10 @@ fun WaterTemperatureMap(accessToken: String) {
                                 getCurrentLocation(
                                     fusedLocationClient = fusedLocationClient,
                                     onLocationReceived = { location ->
-
-                                        registrationLatitude.value =
-                                            location.latitude.toString()
-
-                                        registrationLongitude.value =
-                                            location.longitude.toString()
-
-                                        registrationAccuracy.value =
+                                        beginLocationPicker(
+                                            LatLng(location.latitude, location.longitude),
                                             location.accuracy
+                                        )
                                     },
                                     onError = {
                                         // 今回は何もしない
@@ -1488,6 +1545,23 @@ fun WaterTemperatureMap(accessToken: String) {
                         Text("現在地を取得")
                     }
 
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = {
+                            val latitude = registrationLatitude.value.toDoubleOrNull()
+                            val longitude = registrationLongitude.value.toDoubleOrNull()
+                            val initialLocation = if (
+                                latitude != null && longitude != null &&
+                                latitude in -90.0..90.0 && longitude in -180.0..180.0
+                            ) LatLng(latitude, longitude) else null
+                            beginLocationPicker(initialLocation, registrationAccuracy.value)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("地図から選ぶ")
+                    }
+
                     Spacer(
                         modifier = Modifier.height(8.dp)
                     )
@@ -1497,9 +1571,10 @@ fun WaterTemperatureMap(accessToken: String) {
                     ){
 
                         OutlinedTextField(
-                            value = registrationLatitude.value,
+                                                        value = registrationLatitude.value,
                             onValueChange = {
                                 registrationLatitude.value = it
+                                registrationAccuracy.value = null
                             },
                             label = {
                                 Text("緯度")
@@ -1513,9 +1588,10 @@ fun WaterTemperatureMap(accessToken: String) {
                         )
 
                         OutlinedTextField(
-                            value = registrationLongitude.value,
+                                                        value = registrationLongitude.value,
                             onValueChange = {
                                 registrationLongitude.value = it
+                                registrationAccuracy.value = null
                             },
                             label = {
                                 Text("経度")
@@ -1525,13 +1601,8 @@ fun WaterTemperatureMap(accessToken: String) {
                         )
 
                         registrationAccuracy.value?.let { accuracy ->
-
-                            Text(
-                                text = "水平精度: %.1f m".format(
-                                    accuracy
-                                )
-                            )
-                        }
+                            Text(text = "水平精度: %.1f m".format(accuracy))
+                        } ?: Text("地図で選択した位置（GPS精度情報なし）")
 
                     } else {
 
@@ -1851,11 +1922,147 @@ fun WaterTemperatureMap(accessToken: String) {
                 }
             }
         }
+        }
+
+        if (isPickingLocation.value) {
+            if (showGpsAccuracyWarning.value) {
+                val selectedPoint = pickerSelectedLocation.value
+                if (selectedPoint != null) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = {
+                            showGpsAccuracyWarning.value = false
+                        },
+                        title = { Text("GPS精度情報について") },
+                        text = {
+                            Text("GPS位置から変更すると、GPSの精度情報は記録されなくなります。この位置で確定しますか？")
+                        },
+                        confirmButton = {
+                            androidx.compose.material3.TextButton(
+                                onClick = {
+                                    finishLocationSelection(
+                                        selectedPoint,
+                                        keepGpsAccuracy = false
+                                    )
+                                }
+                            ) {
+                                Text("この位置で確定")
+                            }
+                        },
+                        dismissButton = {
+                            androidx.compose.material3.TextButton(
+                                onClick = {
+                                    val gpsOrigin = pickerInitialLocation.value
+                                    if (gpsOrigin != null) {
+                                        pickerSelectedLocation.value = gpsOrigin
+                                        showGpsAccuracyWarning.value = false
+                                        mapState.value?.let { map ->
+                                            map.cameraPosition = CameraPosition.Builder()
+                                                .target(gpsOrigin)
+                                                .zoom(map.cameraPosition.zoom)
+                                                .build()
+                                        }
+                                    }
+                                }
+                            ) {
+                                Text("元の場所に戻る")
+                            }
+                        }
+                    )
+                }
+            }
+
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Text("📍", modifier = Modifier.offset(y = (-16).dp))
+            }
+
+            Surface(
+                color = Color.White.copy(alpha = 0.96f),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("登録地点を選択")
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text("地図を動かして、中央のピンを登録したい場所に合わせてください。")
+                }
+            }
+
+            Surface(
+                color = Color.White.copy(alpha = 0.96f),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(12.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    pickerSelectedLocation.value?.let { point ->
+                        Text("緯度: %.6f　経度: %.6f".format(point.latitude, point.longitude))
+                    } ?: Text("地図を動かして、中央のピンを登録地点に合わせてください")
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                pickerSelectedLocation.value = null
+                                pickerInitialLocation.value = null
+                                pickerAccuracy.value = null
+                                showGpsAccuracyWarning.value = false
+                                isPickingLocation.value = false
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("キャンセル")
+                        }
+
+                        Button(
+                            onClick = {
+                                pickerSelectedLocation.value?.let { point ->
+                                    val gpsOrigin = pickerInitialLocation.value
+                                    val distanceFromGps = if (
+                                        gpsOrigin != null && pickerAccuracy.value != null
+                                    ) {
+                                        val result = FloatArray(1)
+                                        Location.distanceBetween(
+                                            gpsOrigin.latitude,
+                                            gpsOrigin.longitude,
+                                            point.latitude,
+                                            point.longitude,
+                                            result
+                                        )
+                                        result[0]
+                                    } else {
+                                        0f
+                                    }
+
+                                    if (distanceFromGps > 1f) {
+                                        showGpsAccuracyWarning.value = true
+                                    } else {
+                                        finishLocationSelection(point, keepGpsAccuracy = true)
+                                    }
+                                }
+                            },
+                            enabled = pickerSelectedLocation.value != null,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("この場所に決定")
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
-private const val GSI_STYLE = """
-{
+private const val GSI_STYLE = """{
   "version": 8,
   "sources": {
     "gsi-standard": {
@@ -1985,6 +2192,7 @@ fun getCurrentLocation(
         onError()
     }
 }
+
 
 
 

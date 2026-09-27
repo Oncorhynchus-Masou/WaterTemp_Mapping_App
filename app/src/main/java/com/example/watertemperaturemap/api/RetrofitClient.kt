@@ -31,7 +31,7 @@ object RetrofitClient {
                 val original = chain.request()
                 val path = original.url.encodedPath
                 val isAuthenticationRequest = path.endsWith("/users/login") ||
-                    path.endsWith("/auth/refresh")
+                    path.endsWith("/auth/refresh") || path.endsWith("/auth/logout")
 
                 val context = appContext
                 val accessToken = if (isAuthenticationRequest || context == null) {
@@ -65,5 +65,6 @@ object RetrofitClient {
             .create(ApiService::class.java)
     }
 }
+
 
 

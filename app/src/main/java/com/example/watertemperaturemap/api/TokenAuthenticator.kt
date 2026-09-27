@@ -71,11 +71,16 @@ class TokenAuthenticator(context: Context) : Authenticator {
                 }
                 return null
             }
-            val newAccessToken = refreshed.body()?.accessToken
-                ?.takeIf { it.isNotBlank() }
+            val tokenResponse = refreshed.body() ?: return null
+            val newAccessToken = tokenResponse.accessToken.takeIf { it.isNotBlank() }
+                ?: return null
+            val newRefreshToken = tokenResponse.refreshToken.takeIf { it.isNotBlank() }
                 ?: return null
 
-            preferences.edit().putString("access_token", newAccessToken).commit()
+            preferences.edit()
+                .putString("access_token", newAccessToken)
+                .putString("refresh_token", newRefreshToken)
+                .commit()
 
             return response.request.newBuilder()
                 .header("Authorization", "Bearer $newAccessToken")
@@ -98,5 +103,6 @@ private interface RefreshApiService {
     @POST("auth/refresh")
     fun refreshToken(@Body request: RefreshRequest): Call<RefreshResponse>
 }
+
 
 

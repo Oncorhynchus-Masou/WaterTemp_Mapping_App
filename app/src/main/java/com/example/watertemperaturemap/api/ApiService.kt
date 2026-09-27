@@ -28,8 +28,15 @@ interface ApiService {
         @Body request: RefreshRequest
     ): RefreshResponse
 
+    @POST("auth/logout")
+    suspend fun logout(
+        @Body request: RefreshRequest
+    )
+
     @POST("users/login")
     suspend fun login(
         @Body request: LoginRequest
     ): LoginResponse
 }
+
+
