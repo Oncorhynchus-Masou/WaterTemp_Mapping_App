@@ -36,7 +36,19 @@ data class Measurement(
 
     val readings: List<Reading>,
 
-    val id: Int
+    val id: Int,
+
+    @SerializedName("deletion_request_pending")
+    val deletionRequestPending: Boolean = false
+)
+
+data class MeasurementDeletionRequestResponse(
+    val id: Int,
+
+    @SerializedName("measurement_id")
+    val measurementId: Int,
+
+    val status: String
 )
 
 data class Reading(

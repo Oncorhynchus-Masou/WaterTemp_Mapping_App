@@ -7,10 +7,12 @@ import com.example.watertemperaturemap.model.RefreshRequest
 import com.example.watertemperaturemap.model.RefreshResponse
 import com.example.watertemperaturemap.model.Measurement
 import com.example.watertemperaturemap.model.MeasurementCreate
+import com.example.watertemperaturemap.model.MeasurementDeletionRequestResponse
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.Path
 
 interface ApiService {
 
@@ -19,6 +21,11 @@ interface ApiService {
 
     @GET("users/me/measurements")
     suspend fun getMyMeasurements(): List<Measurement>
+
+    @POST("measurements/{measurementId}/deletion-requests")
+    suspend fun requestMeasurementDeletion(
+        @Path("measurementId") measurementId: Int
+    ): MeasurementDeletionRequestResponse
 
     @POST("measurements")
     suspend fun createMeasurement(

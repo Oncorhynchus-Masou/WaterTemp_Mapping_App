@@ -568,6 +568,9 @@ fun WaterTemperatureMap(
     val showMyMeasurements = remember { mutableStateOf(false) }
     val isLoadingMyMeasurements = remember { mutableStateOf(false) }
     val myMeasurementsError = remember { mutableStateOf<String?>(null) }
+    val deletionRequestTarget = remember { mutableStateOf<Measurement?>(null) }
+    val isSubmittingDeletionRequest = remember { mutableStateOf(false) }
+    val deletionRequestError = remember { mutableStateOf<String?>(null) }
 
     fun loadMyMeasurements() {
         showMyMeasurements.value = true
@@ -586,6 +589,39 @@ fun WaterTemperatureMap(
                     isLoadingMyMeasurements.value = false
                     myMeasurementsError.value =
                         "投稿一覧を取得できませんでした。\n通信を確認して再試行してください。"
+                }
+            }
+        }
+    }
+
+    fun submitDeletionRequest(measurement: Measurement) {
+        isSubmittingDeletionRequest.value = true
+        deletionRequestError.value = null
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                RetrofitClient.apiService.requestMeasurementDeletion(measurement.id)
+                withContext(Dispatchers.Main) {
+                    myMeasurements.value = myMeasurements.value.map { current ->
+                        if (current.id == measurement.id) {
+                            current.copy(deletionRequestPending = true)
+                        } else {
+                            current
+                        }
+                    }
+                    isSubmittingDeletionRequest.value = false
+                    deletionRequestTarget.value = null
+                    android.widget.Toast.makeText(
+                        context,
+                        "削除申請を記録しました。運営へのメール通知は未設定です。",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    isSubmittingDeletionRequest.value = false
+                    deletionRequestError.value =
+                        "申請を送信できませんでした。通信を確認して再試行してください。"
                 }
             }
         }
@@ -2173,30 +2209,51 @@ fun WaterTemperatureMap(
                                         modifier = Modifier
                                             .fillMaxWidth()
                                             .padding(vertical = 4.dp)
-                                            .clickable {
-                                                selectedMeasurement.value = measurement
-                                                showMyMeasurements.value = false
-                                                mapState.value?.animateCamera(
-                                                    CameraUpdateFactory.newLatLngZoom(
-                                                        LatLng(
-                                                            measurement.latitude,
-                                                            measurement.longitude
-                                                        ),
-                                                        12.0
-                                                    )
-                                                )
-                                            }
                                     ) {
                                         Column(modifier = Modifier.padding(12.dp)) {
-                                            Text(measurement.measuredAt)
-                                            Text(
-                                                "水温データ ${measurement.readings.size}件　" +
-                                                    "気温 ${measurement.airTemperatureC?.let { "$it ℃" } ?: "未記録"}"
-                                            )
-                                            Text(
-                                                "位置 ${"%.5f".format(measurement.latitude)}, " +
-                                                    "${"%.5f".format(measurement.longitude)}"
-                                            )
+                                            Column(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        selectedMeasurement.value = measurement
+                                                        showMyMeasurements.value = false
+                                                        mapState.value?.animateCamera(
+                                                            CameraUpdateFactory.newLatLngZoom(
+                                                                LatLng(
+                                                                    measurement.latitude,
+                                                                    measurement.longitude
+                                                                ),
+                                                                12.0
+                                                            )
+                                                        )
+                                                    }
+                                            ) {
+                                                Text(measurement.measuredAt)
+                                                Text(
+                                                    "水温データ ${measurement.readings.size}件　" +
+                                                        "気温 ${measurement.airTemperatureC?.let { "$it ℃" } ?: "未記録"}"
+                                                )
+                                                Text(
+                                                    "位置 ${"%.5f".format(measurement.latitude)}, " +
+                                                        "${"%.5f".format(measurement.longitude)}"
+                                                )
+                                            }
+
+                                            Spacer(modifier = Modifier.height(8.dp))
+
+                                            if (measurement.deletionRequestPending) {
+                                                Text("削除申請中")
+                                            } else {
+                                                Button(
+                                                    onClick = {
+                                                        deletionRequestError.value = null
+                                                        deletionRequestTarget.value = measurement
+                                                    },
+                                                    enabled = !isSubmittingDeletionRequest.value
+                                                ) {
+                                                    Text("削除申請")
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -2205,6 +2262,46 @@ fun WaterTemperatureMap(
                     }
                 }
             }
+        }
+
+        deletionRequestTarget.value?.let { measurement ->
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = {
+                    if (!isSubmittingDeletionRequest.value) {
+                        deletionRequestTarget.value = null
+                        deletionRequestError.value = null
+                    }
+                },
+                title = { Text("削除を申請しますか？") },
+                text = {
+                    Column {
+                        Text("この測定データの削除を運営に申請します。申請後すぐには削除されず、運営が内容を確認します。")
+                        deletionRequestError.value?.let { error ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(error)
+                        }
+                    }
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = { submitDeletionRequest(measurement) },
+                        enabled = !isSubmittingDeletionRequest.value
+                    ) {
+                        Text(if (isSubmittingDeletionRequest.value) "送信中..." else "申請する")
+                    }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            deletionRequestTarget.value = null
+                            deletionRequestError.value = null
+                        },
+                        enabled = !isSubmittingDeletionRequest.value
+                    ) {
+                        Text("キャンセル")
+                    }
+                }
+            )
         }
 
         if (isPickingLocation.value) {
