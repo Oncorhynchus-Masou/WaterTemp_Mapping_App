@@ -50,6 +50,7 @@ import androidx.compose.runtime.setValue
 import org.maplibre.android.annotations.Marker
 import org.maplibre.android.maps.MapLibreMap
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.geometry.Offset
@@ -60,6 +61,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.result.contract.ActivityResultContracts
@@ -1675,6 +1677,29 @@ fun WaterTemperatureMap(accessToken: String) {
                                 singleLine = true,
                                 modifier = Modifier.weight(1f)
                             )
+
+                            if (index > 0) {
+                                Button(
+                                    onClick = {
+                                        if (registrationReadings.size > 1) {
+                                            registrationReadings.removeAt(index)
+                                            registrationMessage.value = ""
+                                        }
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFFECEFF1),
+                                        contentColor = Color(0xFF424242)
+                                    ),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
+                                        horizontal = 12.dp,
+                                        vertical = 0.dp
+                                    ),
+                                    modifier = Modifier.height(48.dp)
+                                ) {
+                                    Text("削除")
+                                }
+                            }
                         }
 
                         Spacer(
@@ -1744,6 +1769,21 @@ fun WaterTemperatureMap(accessToken: String) {
                             }
 
                             when {
+
+                                registrationReadings.isEmpty() -> {
+                                    registrationMessage.value =
+                                        "水温データを1行以上入力してください"
+                                }
+
+                                registrationReadings.any { reading ->
+                                    reading.first.isBlank() || reading.second.isBlank()
+                                } -> {
+                                    val emptyRow = registrationReadings.indexOfFirst { reading ->
+                                        reading.first.isBlank() || reading.second.isBlank()
+                                    } + 1
+                                    registrationMessage.value =
+                                        "水温測定データの${emptyRow}行目で、深度と水温を入力してください"
+                                }
 
                                 registrationMeasuredAt.value.isBlank() -> {
                                     registrationMessage.value =
