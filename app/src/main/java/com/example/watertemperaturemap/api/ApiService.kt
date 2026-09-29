@@ -17,9 +17,13 @@ interface ApiService {
     @GET("measurements")
     suspend fun getMeasurements(): List<Measurement>
 
+    @GET("users/me/measurements")
+    suspend fun getMyMeasurements(): List<Measurement>
+
     @POST("measurements")
     suspend fun createMeasurement(
         @Header("Authorization") authorization: String,
+        @Header("Idempotency-Key") idempotencyKey: String,
         @Body measurement: MeasurementCreate
     ): Measurement
 

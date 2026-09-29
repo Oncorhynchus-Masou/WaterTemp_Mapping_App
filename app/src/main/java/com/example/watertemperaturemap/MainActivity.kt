@@ -20,14 +20,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
@@ -53,6 +56,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Spacer
@@ -86,6 +90,7 @@ import android.content.Context
 import com.example.watertemperaturemap.model.LoginRequest
 import com.example.watertemperaturemap.model.LoginResponse
 import com.example.watertemperaturemap.model.RefreshRequest
+import java.util.UUID
 
 
 class MainActivity : ComponentActivity() {
@@ -232,10 +237,9 @@ fun AppRoot() {
 
         else -> {
             Box(modifier = Modifier.fillMaxSize()) {
-                WaterTemperatureMap(accessToken = accessToken!!)
-
-                Button(
-                    onClick = {
+                WaterTemperatureMap(
+                    accessToken = accessToken!!,
+                    onLogout = {
                         val tokenToRevoke = preferences.getString("refresh_token", null)
                         preferences.edit()
                             .remove("access_token")
@@ -262,13 +266,8 @@ fun AppRoot() {
                                 }
                             }
                         }
-                    },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 64.dp, end = 8.dp)
-                ) {
-                    Text("ログアウト")
-                }
+                    }
+                )
             }
         }
     }
@@ -425,7 +424,10 @@ fun LoginScreen(
 }
 
 @Composable
-fun WaterTemperatureMap(accessToken: String) {
+fun WaterTemperatureMap(
+    accessToken: String,
+    onLogout: () -> Unit
+) {
 
     val context = LocalContext.current
     val fusedLocationClient = remember {
@@ -498,6 +500,7 @@ fun WaterTemperatureMap(accessToken: String) {
     val showRegistration = remember {
         mutableStateOf(false)
     }
+    val showActionMenu = remember { mutableStateOf(false) }
 
     // 気温
     val registrationAirTemperature = remember {
@@ -519,6 +522,11 @@ fun WaterTemperatureMap(accessToken: String) {
     // 登録中のメッセージ
     val registrationMessage = remember {
         mutableStateOf("")
+    }
+
+    // 通信再試行時に同じ依頼キーを使い、二重登録を防ぐ
+    val pendingRegistrationRequest = remember {
+        mutableStateOf<Pair<MeasurementCreate, String>?>(null)
     }
 
     //
@@ -552,6 +560,54 @@ fun WaterTemperatureMap(accessToken: String) {
     // APIから取得した全測定データ
     val allMeasurements = remember {
         mutableStateOf<List<Measurement>>(emptyList())
+    }
+
+    val myMeasurements = remember {
+        mutableStateOf<List<Measurement>>(emptyList())
+    }
+    val showMyMeasurements = remember { mutableStateOf(false) }
+    val isLoadingMyMeasurements = remember { mutableStateOf(false) }
+    val myMeasurementsError = remember { mutableStateOf<String?>(null) }
+
+    fun loadMyMeasurements() {
+        showMyMeasurements.value = true
+        isLoadingMyMeasurements.value = true
+        myMeasurementsError.value = null
+
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val ownPosts = RetrofitClient.apiService.getMyMeasurements()
+                withContext(Dispatchers.Main) {
+                    myMeasurements.value = ownPosts
+                    isLoadingMyMeasurements.value = false
+                }
+            } catch (_: Exception) {
+                withContext(Dispatchers.Main) {
+                    isLoadingMyMeasurements.value = false
+                    myMeasurementsError.value =
+                        "投稿一覧を取得できませんでした。\n通信を確認して再試行してください。"
+                }
+            }
+        }
+    }
+
+    fun startNewRegistration() {
+        val now = java.text.SimpleDateFormat(
+            "yyyy-MM-dd HH:mm:ss",
+            java.util.Locale.getDefault()
+        ).format(java.util.Date())
+
+        registrationMeasuredAt.value = now
+        registrationLatitude.value = ""
+        registrationLongitude.value = ""
+        registrationAccuracy.value = null
+        registrationAirTemperature.value = ""
+        registrationMessage.value = ""
+        pendingRegistrationRequest.value = null
+        registrationReadings.clear()
+        registrationReadings.add(Pair("0.0", ""))
+        selectedCsvUri.value = null
+        showRegistration.value = true
     }
 
     // 選択中の年
@@ -987,44 +1043,86 @@ fun WaterTemperatureMap(accessToken: String) {
             }
         }
 
-        // ③ 測定登録ボタン
-        Surface(
-            color = Color.White.copy(alpha = 0.95f),
-            shape = CircleShape,
+        // ③ アプリメニュー
+        Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(
-                    end = 8.dp,
-                    bottom = 60.dp
-                )
-                .clickable {
-
-                    val now = java.text.SimpleDateFormat(
-                        "yyyy-MM-dd HH:mm:ss",
-                        java.util.Locale.getDefault()
-                    ).format(java.util.Date())
-
-                    registrationMeasuredAt.value = now
-
-                    // 新しい登録なので、以前の位置情報をリセット
-                    registrationLatitude.value = ""
-                    registrationLongitude.value = ""
-                    registrationAccuracy.value = null
-
-                    registrationAirTemperature.value = ""
-                    registrationReadings.clear()
-                    registrationReadings.add(
-                        Pair("0.0", "")
-                    )
-                    selectedCsvUri.value = null
-
-                    showRegistration.value = true
-                }
+                .padding(end = 8.dp, bottom = 60.dp)
         ) {
-            Text(
-                text = "＋",
-                modifier = Modifier.padding(14.dp)
-            )
+            Surface(
+                color = Color.White.copy(alpha = 0.95f),
+                shape = CircleShape,
+                modifier = Modifier.clickable {
+                    showActionMenu.value = true
+                }
+            ) {
+                Text(
+                    text = "＋",
+                    modifier = Modifier.padding(14.dp)
+                )
+            }
+
+            DropdownMenu(
+                expanded = showActionMenu.value,
+                onDismissRequest = { showActionMenu.value = false }
+            ) {
+                Column(
+                    modifier = Modifier.padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Surface(
+                        color = Color(0xFF3F444A),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showActionMenu.value = false
+                                startNewRegistration()
+                            }
+                    ) {
+                        Text(
+                            "データ登録",
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Surface(
+                        color = Color(0xFF3F444A),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showActionMenu.value = false
+                                loadMyMeasurements()
+                            }
+                    ) {
+                        Text(
+                            "登録データ一覧",
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Surface(
+                        color = Color(0xFF3F444A),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                showActionMenu.value = false
+                                onLogout()
+                            }
+                    ) {
+                        Text(
+                            "ログアウト",
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp),
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
         }
 
         // ④ 国土地理院タイル表示
@@ -1456,13 +1554,22 @@ fun WaterTemperatureMap(accessToken: String) {
                             modifier = Modifier.align(Alignment.CenterStart)
                         )
 
-                        IconButton(
+                        Button(
                             onClick = {
                                 showRegistration.value = false
                             },
-                            modifier = Modifier.align(Alignment.CenterEnd)
+                            modifier = Modifier
+                                .align(Alignment.CenterEnd)
+                                .offset(y = 16.dp)
+                                .size(48.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFEA617C),
+                                contentColor = Color.White
+                            ),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
                         ) {
-                            Text("×")
+                            Text("×", fontSize = 26.sp, lineHeight = 26.sp)
                         }
                     }
 
@@ -1891,6 +1998,14 @@ fun WaterTemperatureMap(accessToken: String) {
                                     // API登録
                                     // ---------------------------------
 
+                                    val previousRequest = pendingRegistrationRequest.value
+                                    val idempotencyKey = previousRequest
+                                        ?.takeIf { it.first == measurement }
+                                        ?.second
+                                        ?: UUID.randomUUID().toString().also { key ->
+                                            pendingRegistrationRequest.value = measurement to key
+                                        }
+
                                     isRegistering.value = true
                                     registrationMessage.value =
                                         "登録しています..."
@@ -1899,31 +2014,49 @@ fun WaterTemperatureMap(accessToken: String) {
 
                                         try {
 
-                                            // 修正後
-                                            val registeredMeasurement = RetrofitClient.apiService.createMeasurement(
+                                            RetrofitClient.apiService.createMeasurement(
                                                 authorization = "Bearer $accessToken",
+                                                idempotencyKey = idempotencyKey,
                                                 measurement = measurement
                                             )
 
-                                            // 最新データを再取得
-                                            val measurements =
-                                                RetrofitClient.apiService
-                                                    .getMeasurements()
+                                            withContext(Dispatchers.Main) {
+                                                pendingRegistrationRequest.value = null
+                                            }
+
+                                            // 登録結果とは分けて一覧を再取得する。
+                                            val measurements = try {
+                                                RetrofitClient.apiService.getMeasurements()
+                                            } catch (_: Exception) {
+                                                null
+                                            }
 
                                             withContext(Dispatchers.Main) {
 
-                                                allMeasurements.value =
-                                                    measurements
+                                                if (measurements != null) {
+                                                    allMeasurements.value = measurements
+                                                }
 
                                                 isRegistering.value = false
 
-                                                registrationMessage.value =
+                                                registrationMessage.value = if (measurements != null) {
                                                     "登録成功"
+                                                } else {
+                                                    "登録しましたが、一覧の更新に失敗しました"
+                                                }
 
                                                 android.widget.Toast.makeText(
                                                     context,
-                                                    "測定データを登録しました",
-                                                    android.widget.Toast.LENGTH_SHORT
+                                                    if (measurements != null) {
+                                                        "測定データを登録しました"
+                                                    } else {
+                                                        "登録は完了しました。地図を再表示して確認してください。"
+                                                    },
+                                                    if (measurements != null) {
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    } else {
+                                                        android.widget.Toast.LENGTH_LONG
+                                                    }
                                                 ).show()
 
                                                 // 登録画面を閉じる
@@ -1939,8 +2072,14 @@ fun WaterTemperatureMap(accessToken: String) {
 
                                                 isRegistering.value = false
 
-                                                registrationMessage.value =
-                                                    "登録失敗: ${e.message}"
+                                                registrationMessage.value = when (e) {
+                                                    is java.io.IOException ->
+                                                        "通信に失敗しました。入力内容は保持されています。同じ内容で再試行できます。"
+                                                    is retrofit2.HttpException ->
+                                                        "登録できませんでした（HTTP ${e.code()}）。入力内容を確認してください。"
+                                                    else ->
+                                                        "登録に失敗しました。入力内容は保持されています。"
+                                                }
                                             }
                                         }
                                     }
@@ -1962,6 +2101,110 @@ fun WaterTemperatureMap(accessToken: String) {
                 }
             }
         }
+        }
+
+        if (showMyMeasurements.value) {
+            Surface(
+                color = Color.White,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "自分の投稿",
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = { showMyMeasurements.value = false },
+                            modifier = Modifier
+                                .offset(y = 16.dp)
+                                .size(48.dp),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFEA617C),
+                                contentColor = Color.White
+                            ),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp)
+                        ) {
+                            Text("×", fontSize = 26.sp, lineHeight = 26.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    when {
+                        isLoadingMyMeasurements.value -> {
+                            Text("投稿一覧を読み込んでいます...")
+                        }
+
+                        myMeasurementsError.value != null -> {
+                            Text(
+                                myMeasurementsError.value!!,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Button(onClick = { loadMyMeasurements() }) {
+                                Text("再試行")
+                            }
+                        }
+
+                        myMeasurements.value.isEmpty() -> {
+                            Text("投稿データはありません")
+                        }
+
+                        else -> {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f)
+                                    .verticalScroll(rememberScrollState())
+                            ) {
+                                myMeasurements.value.forEach { measurement ->
+                                    Surface(
+                                        color = Color(0xFFF1F3F4),
+                                        shape = RoundedCornerShape(8.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                            .clickable {
+                                                selectedMeasurement.value = measurement
+                                                showMyMeasurements.value = false
+                                                mapState.value?.animateCamera(
+                                                    CameraUpdateFactory.newLatLngZoom(
+                                                        LatLng(
+                                                            measurement.latitude,
+                                                            measurement.longitude
+                                                        ),
+                                                        12.0
+                                                    )
+                                                )
+                                            }
+                                    ) {
+                                        Column(modifier = Modifier.padding(12.dp)) {
+                                            Text(measurement.measuredAt)
+                                            Text(
+                                                "水温データ ${measurement.readings.size}件　" +
+                                                    "気温 ${measurement.airTemperatureC?.let { "$it ℃" } ?: "未記録"}"
+                                            )
+                                            Text(
+                                                "位置 ${"%.5f".format(measurement.latitude)}, " +
+                                                    "${"%.5f".format(measurement.longitude)}"
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         if (isPickingLocation.value) {
